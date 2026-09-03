@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788441688101,
+      "tag": "0000_motionless_patch",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788442426419,
+      "tag": "0001_glorious_raider",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788442726805,
+      "tag": "0002_clumsy_venom",
+      "breakpoints": true
+    }
+  ]
+}
