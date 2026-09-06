@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { GoHomeButton } from '../../../components/go-home-button';
 import { InviteDecision } from '../../../components/invite-decision';
 import { StoreError } from '../../../lib/server/errors';
 import { peekMateInvite } from '../../../lib/server/mates';
@@ -46,7 +46,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           <>
             <h1>Invite not available</h1>
             <p>{preview.message}</p>
-            <Link className="primary-button" href="/">Go to Padel Mate</Link>
+            <GoHomeButton />
           </>
         )}
       </div>

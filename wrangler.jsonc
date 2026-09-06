@@ -1,6 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "padel-mate",
+  // Same account that owns the D1 database below. CI must not point Wrangler
+  // at a different CLOUDFLARE_ACCOUNT_ID or remote D1 calls return 7003.
+  "account_id": "5502de84f452818e0597478d66ee806a",
 
   // Two independent floors apply here, and the later one wins:
   //   2025-04-01 - nodejs_compat starts populating `process.env` from vars and

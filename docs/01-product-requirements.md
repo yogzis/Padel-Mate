@@ -51,7 +51,7 @@ A player can take part in many scoreboard contexts, and their score in each cont
 
 Another player you have connected with, and the only people you can build a scoreboard context from.
 
-Mates are established by invite link. A player generates a single-use link with an expiry and shares it directly. The person who opens it while signed in sees who sent it and must accept or decline. Accepting creates the mate relationship both ways. Declining consumes the link without creating a relationship. There is deliberately no way to search the app for other users, so the membership list cannot be enumerated.
+Mates are established by invite link. A player generates a single-use link that expires 30 minutes after it is created and shares it directly. Creating another unused invite deletes the previous unused one, so only the latest link works. The person who opens it while signed in sees who sent it and must accept or decline. Accepting creates the mate relationship both ways. Declining consumes the link without creating a relationship. There is deliberately no way to search the app for other users, so the membership list cannot be enumerated.
 
 ### Guest
 
@@ -351,12 +351,20 @@ Acceptance criteria:
 
 - A player record is created automatically on first sign-in, named from the sign-in provider, with no action from the user.
 - A signed-in user can generate an invite link to share directly.
-- An invite link is single-use and expires.
+- A player has at most one unused invite. Creating a new invite deletes any unused invite they previously issued, and the old link is refused.
+- Creating the first unused invite opens the same share dialog used for activity share, showing the invite link with Copy and WhatsApp. Device slots are omitted.
+- If an unused invite is still within 30 minutes of creation, Mates offers Show current invite link and Create new invite. Create new invite asks for confirmation before replacing the old link. If none is valid, only Create invite link is shown.
+- While an unused invite exists, Mates offers a delete control. Deleting removes the unused link and returns to Create invite link. An already-accepted invite cannot be deleted.
+- Opening the Mates screen, and Refresh, also load the current unused invite if it has not expired.
+- An invite link is single-use and expires 30 minutes after it is created.
+- Mates shows a live countdown while the unused invite is valid. When the timer reaches zero, the two share buttons are replaced by Create invite link.
 - Opening a valid invite link while signed in shows who sent it and asks the recipient to accept or decline.
 - Accepting establishes the mate relationship in both directions.
+- After accepting, Go to your mates does a full page load of `/?screen=mates` and opens the Mates screen. Declining or opening a refused invite still returns to Groups via `/`.
 - Declining consumes the link and does not create a mate relationship.
-- An expired, already-used, or self-issued invite link is refused with a clear message.
+- An expired, already-used, replaced, or self-issued invite link is refused with a clear message.
 - A user can view their mate list and remove a mate.
+- Opening the Mates screen fetches the current mate list without a page reload. A Refresh control on that screen runs the same fetch.
 - Removing a mate leaves existing shared contexts visible as history. New activity is blocked there until the members are mates again.
 - The app provides no way to search or browse other users, so the membership list cannot be enumerated.
 - Player names may be duplicated between accounts; players are distinguished by identity, not by name.
@@ -642,7 +650,10 @@ Included:
 
 - Google sign-in.
 - Automatic player creation on first sign-in.
-- Mate lists built from single-use invite links.
+- Mate lists built from single-use invite links that expire after 30 minutes.
+- Creating a new invite deletes the player's unused previous invite.
+- Mate invites use the same share dialog as activity share, with Copy and WhatsApp.
+- Mates list refreshes when the screen opens and from a Refresh control.
 - Anonymous guest slots that play without ranking.
 - Context selection from two to four registered players, with automatic context creation.
 - Context dashboard.
