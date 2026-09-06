@@ -1162,6 +1162,10 @@ npm run db:reset                 # stop the dev server first
 
 ### Deployment
 
+A local production ship is `npm run deploy`, which runs `vinext build` and then `wrangler deploy --config dist/server/wrangler.json`. The Vite Cloudflare plugin emits the Worker entry and a resolved Wrangler config under `dist/server/`; the repo-root `wrangler.jsonc` is the source for bindings and production `vars`, not the file Wrangler uploads.
+
+`@vinext/cloudflare deploy` is not used. That CLI dropped `--config` and its setup check only recognizes a static `import { cloudflare }` from `@cloudflare/vite-plugin`. This repo loads that plugin dynamically in `vite.config.ts` so Wrangler log paths are set before the plugin snapshots them.
+
 Pushing to the `production` branch runs `.github/workflows/deploy.yml`, which lints, tests, type-checks, builds, applies D1 migrations with `npm run db:migrate:remote`, and then deploys with `npm run deploy`. Migrations run before the deploy so new code never meets an old schema.
 
 The workflow needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.

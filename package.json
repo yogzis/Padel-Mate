@@ -16,7 +16,7 @@
     "db:migrate": "wrangler d1 migrations apply padel-mate --local",
     "db:reset": "bash scripts/reset-local-db.sh",
     "db:migrate:remote": "wrangler d1 migrations apply padel-mate --remote",
-    "deploy": "vinext-cloudflare deploy --config dist/server/wrangler.json"
+    "deploy": "vinext build && wrangler deploy --config dist/server/wrangler.json"
   },
   "dependencies": {
     "better-auth": "^1.7.2",
