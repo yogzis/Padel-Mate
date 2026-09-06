@@ -16,12 +16,22 @@
 - [x] Administrator cannot suspend their own account.
 - [x] Non-administrators are refused by every administration endpoint.
 - [x] Signing in creates a player automatically, with no profile step and no linking step.
-- [x] User can generate a single-use invite link that expires.
+- [x] User can generate a single-use invite link that expires 30 minutes after creation.
+- [x] Mates shows a live countdown while the unused invite is valid, then only Create invite link when it expires.
+- [x] Creating a new invite deletes the player's unused previous invite, and the old link is refused.
+- [x] Mate invites use the same share dialog as activity share, with the invite link, Copy, and WhatsApp, and without device slots.
+- [x] Mates shows Create invite link, or Show current invite link plus Create new invite when an unused invite has not expired.
+- [x] Mates can delete an unused invite; an already-accepted invite cannot be deleted.
+- [x] Create new invite confirms before replacing the unused previous link. Cancel leaves the old link valid.
+- [x] Opening Mates and Refresh load the unused unexpired invite.
 - [x] Opening a valid invite link while signed in shows who sent it and asks to accept or decline.
 - [x] Accepting an invite creates the mate relationship both ways.
+- [x] After accepting, Go to your mates opens the Mates screen via a full load of `/?screen=mates`.
 - [x] Declining an invite consumes the link and does not create a mate relationship.
 - [x] Expired, already-used, and self-issued invite links are refused with a clear reason.
 - [x] User can view and remove mates.
+- [x] Opening the Mates screen fetches the current mate list without a page reload.
+- [x] The Mates screen has a Refresh control that runs the same fetch.
 - [x] Removing a mate leaves existing shared contexts visible as history.
 - [x] New activity is blocked when any registered member is no longer a mate.
 - [x] The app offers no way to search or browse other users.

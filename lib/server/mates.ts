@@ -1,14 +1,14 @@
 import { env } from 'cloudflare:workers';
-import type { Mate, MateInviteLink } from '../domain';
+import { MATE_INVITE_LIFETIME_MS, type Mate, type MateInviteLink } from '../domain';
+import { remainingMateInviteMs } from '../mate-invite';
 import { StoreError } from './errors';
-
-const INVITE_LIFETIME_MS = 48 * 60 * 60 * 1000;
 
 type InviteRow = {
   token: string;
   created_by_player_id: string;
   expires_at: string;
   consumed_at: string | null;
+  created_at: string;
 };
 
 function db() {
@@ -24,14 +24,22 @@ export function inviteUrlFor(token: string): string {
 export async function createMateInvite(playerId: string): Promise<MateInviteLink> {
   const token = crypto.randomUUID();
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + INVITE_LIFETIME_MS).toISOString();
+  const createdAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + MATE_INVITE_LIFETIME_MS).toISOString();
 
-  await db().prepare(
-    `INSERT INTO mate_invites (token, created_by_player_id, expires_at, created_at)
-     VALUES (?, ?, ?, ?)`,
-  ).bind(token, playerId, expiresAt, now.toISOString()).run();
+  // A player has one unused invite at a time. Delete leftover open links
+  // before inserting, so a replaced URL cannot still be accepted.
+  await db().batch([
+    db().prepare(
+      'DELETE FROM mate_invites WHERE created_by_player_id = ? AND consumed_at IS NULL',
+    ).bind(playerId),
+    db().prepare(
+      `INSERT INTO mate_invites (token, created_by_player_id, expires_at, created_at)
+       VALUES (?, ?, ?, ?)`,
+    ).bind(token, playerId, expiresAt, createdAt),
+  ]);
 
-  return { token, url: inviteUrlFor(token), expiresAt };
+  return { token, url: inviteUrlFor(token), createdAt, expiresAt };
 }
 
 type OpenInvite = InviteRow & { inviter: Mate };
@@ -41,12 +49,12 @@ async function loadOpenInvite(playerId: string, tokenValue: unknown): Promise<Op
   if (!token) throw new StoreError(400, 'That invite link is not valid.');
 
   const invite = await db().prepare(
-    'SELECT token, created_by_player_id, expires_at, consumed_at FROM mate_invites WHERE token = ?',
+    'SELECT token, created_by_player_id, expires_at, consumed_at, created_at FROM mate_invites WHERE token = ?',
   ).bind(token).first<InviteRow>();
 
   if (!invite) throw new StoreError(404, 'That invite link is not valid.');
   if (invite.consumed_at) throw new StoreError(409, 'That invite link has already been used.');
-  if (new Date(invite.expires_at).getTime() <= Date.now()) {
+  if (remainingMateInviteMs(invite.created_at) <= 0) {
     throw new StoreError(410, 'That invite link has expired. Ask for a new one.');
   }
 
@@ -100,6 +108,34 @@ export async function rejectMateInvite(playerId: string, tokenValue: unknown): P
   ).bind(now, playerId, invite.token).run();
 
   if (!claim.meta.changes) throw new StoreError(409, 'That invite link has already been used.');
+  return { ok: true };
+}
+
+export async function getOpenMateInvite(playerId: string): Promise<MateInviteLink | null> {
+  const createdAfter = new Date(Date.now() - MATE_INVITE_LIFETIME_MS).toISOString();
+  const row = await db().prepare(
+    `SELECT token, expires_at, created_at FROM mate_invites
+     WHERE created_by_player_id = ? AND consumed_at IS NULL AND created_at > ?
+     ORDER BY created_at DESC LIMIT 1`,
+  ).bind(playerId, createdAfter).first<{ token: string; expires_at: string; created_at: string }>();
+
+  if (!row) return null;
+  return {
+    token: row.token,
+    url: inviteUrlFor(row.token),
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+export async function deleteOpenMateInvite(playerId: string): Promise<{ ok: true }> {
+  const result = await db().prepare(
+    'DELETE FROM mate_invites WHERE created_by_player_id = ? AND consumed_at IS NULL',
+  ).bind(playerId).run();
+
+  if (!result.meta.changes) {
+    throw new StoreError(409, 'That invite link has already been used or is no longer available.');
+  }
   return { ok: true };
 }
 

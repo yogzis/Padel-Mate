@@ -102,7 +102,7 @@ flowchart TD
 
 ## 1.0.06 Mate Invite Flow
 
-There is no user search. A link shared directly is the only route to becoming mates.
+There is no user search. A link shared directly is the only route to becoming mates. An unused invite is valid for 30 minutes from creation. The inviter can delete an unused invite; an already-accepted invite cannot be deleted. Opening the Mates screen fetches the current list and any unused unexpired invite; Refresh on that screen runs the same fetch. The inviter shares from the same dialog as activity share. There is no background poll.
 
 ```mermaid
 sequenceDiagram
@@ -112,6 +112,7 @@ sequenceDiagram
   participant B as Invitee
 
   A->>W: POST create invite
+  W->>D1: delete unused invites from this player
   W->>D1: store token, creator, expiry
   W-->>A: single-use link
   A-->>B: shares link directly
@@ -119,7 +120,7 @@ sequenceDiagram
   B->>W: opens link while signed in
   W->>D1: look up token
 
-  alt Expired, already used, or self-issued
+  alt Expired, already used, replaced, or self-issued
     W-->>B: refuse with reason
   else Valid
     W-->>B: show inviter and ask to accept or decline
@@ -128,10 +129,12 @@ sequenceDiagram
       W->>D1: write mate relationship both ways
       W->>D1: mark token consumed
       W-->>B: now mates
+      B->>W: Go to your mates (full load /?screen=mates)
     else Decline
       B->>W: decline
       W->>D1: mark token consumed
       W-->>B: not mates
+      B->>W: Go to Padel Mate (full load /)
     end
   end
 ```
@@ -464,6 +467,7 @@ erDiagram
   MATE_INVITE {
     string token
     string createdByPlayerId
+    string createdAt
     string expiresAt
     string consumedAt
     string consumedByPlayerId

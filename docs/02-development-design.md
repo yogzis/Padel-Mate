@@ -196,6 +196,7 @@ Cadence:
 - Team setup and other active-but-not-live screens: every 5 seconds. That is enough to notice a late accept or the other device starting or finishing a set, and it stays well under the 30-second heartbeat window that would otherwise reserve the slot.
 - Context dashboard: every 5 seconds, and again when the tab becomes visible, so Join appears when another member creates an activity.
 - Team setup also has a Refresh button that runs the same fetch once. It is a shortcut, not a replacement for the slow poll.
+- Mates screen: fetch `GET /api/padel?action=mates` when the screen opens, and again from the Refresh control. There is no background poll.
 
 Responsible for:
 
@@ -263,6 +264,7 @@ type Mate = {
 type MateInvite = {
   token: string;
   createdByPlayerId: string;
+  createdAt: string;
   expiresAt: string;
   consumedAt?: string;
   consumedByPlayerId?: string;
@@ -442,19 +444,31 @@ Manage the people you can play scored matches with. This screen requires a signe
 
 Controls:
 
-- Generate invite link.
-- Copy invite link.
+- Create invite link, which creates the unused invite and opens the share dialog.
+- Show current invite link, when an unused invite is still within 30 minutes of creation.
+- Live countdown of remaining invite time.
+- Create new invite, which asks for confirmation before replacing the unused previous link.
+- Delete unused invite, shown only while a valid unused invite exists.
+- The share dialog, shared with activity share: invite link, Copy, and WhatsApp. Device slots are omitted.
 - Mate list.
+- Refresh mate list.
 - Remove mate.
 
 Validation:
 
 - The signed-in user is already a player, so nothing needs creating here.
-- Invite links are single-use and expire; an exhausted or expired link is refused with a clear message.
+- Invite links are single-use and expire 30 minutes after creation; an exhausted or expired link is refused with a clear message.
+- Remaining time is created_at plus 30 minutes minus now. When it reaches zero, Mates shows only Create invite link and closes the share dialog.
+- A player has at most one unused invite. Creating another deletes any unused invite they previously issued.
+- Create new invite confirms first. Cancel leaves the previous link valid.
+- Deleting an unused invite removes it and returns Mates to Create invite link. An already-accepted invite is refused.
+- Opening Mates and Refresh load the unused unexpired invite so Show current invite link survives a reload.
 - Opening a valid link shows the inviter and requires accept or decline before any relationship is written.
 - Declining consumes the link without creating mates.
+- After accept, Go to your mates does a full load of `/?screen=mates` so the home app remounts on Mates. Decline and a refused invite still load `/` (Groups). Client-side routing is not used for this exit, because the production Worker does not reliably complete that transition.
 - A user cannot become their own mate.
 - There is no search field, by design. Other users can only be reached through a link shared directly.
+- Opening Mates, including from Groups Invite mates, fetches the current list. Refresh runs the same fetch. The list is not polled in the background.
 
 ### 6.2 Select Scoreboard Context Screen
 
@@ -524,6 +538,7 @@ Controls:
 
 - Blue Team selection.
 - Red Team selection.
+- Share, which opens the share dialog.
 - Start set button.
 
 Validation:
@@ -588,7 +603,7 @@ Controls:
 - Add point to Blue.
 - Add point to Red.
 - Undo.
-- Share session.
+- Share session, which opens the same share dialog used for mate invites.
 - Open current-game score history.
 - Manually end unfinished set.
 - End activity navigation where appropriate.
@@ -599,6 +614,7 @@ Dialogs:
 - Set completion confirmation.
 - Manual unfinished set confirmation with calculate or disregard actions.
 - Current-game score update history modal.
+- Share dialog: session code, Copy of the join link, WhatsApp, and connected devices.
 
 ## 7. State Transition Rules
 
@@ -727,6 +743,7 @@ Preconditions:
 Postconditions:
 
 - The app generates or displays a share link or session code.
+- Copy writes the join link. WhatsApp sends a short message that includes that link.
 - The app generates a shareable message suitable for WhatsApp or plain text.
 - A second device can join the same activity session.
 - The joining device loads the latest backend state.
@@ -850,7 +867,8 @@ The app should handle these cases:
 
 - Attempt to use app data without sign-in.
 - Attempt to start a context without four filled slots, or with fewer than two registered players.
-- Attempt to consume an expired, already-used, or self-issued invite link.
+- Attempt to consume an expired, already-used, replaced, or self-issued invite link.
+- Attempt to delete an invite that has already been accepted.
 - Attempt to decline a valid invite link.
 - Attempt to start a set with invalid teams.
 - Attempt to score without an active set.
@@ -1041,7 +1059,7 @@ Required:
 
 - Auth-required access guards.
 - Automatic player creation on first sign-in, including the idempotent fallback.
-- Invite link creation, single use, expiry, and self-invite rejection.
+- Invite link creation, replacement of the unused previous invite, single use, expiry, and self-invite rejection.
 - Context key generation from registered players only, ignoring guest slots.
 - Guest slots excluded from leaderboard writes while their partner still scores.
 - Context visibility limited to members.
@@ -1168,4 +1186,12 @@ A local production ship is `npm run deploy`, which runs `vinext build` and then 
 
 Pushing to the `production` branch runs `.github/workflows/deploy.yml`, which lints, tests, type-checks, builds, applies D1 migrations with `npm run db:migrate:remote`, and then deploys with `npm run deploy`. Migrations run before the deploy so new code never meets an old schema.
 
-The workflow needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+The workflow needs two repository secrets: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. `CLOUDFLARE_ACCOUNT_ID` must be exactly the `account_id` in `wrangler.jsonc` (`5502de84f452818e0597478d66ee806a`). Wrangler prefers the env var over the config file, so a different value makes `wrangler d1` call `/accounts/<wrong-id>/d1/database/<real-id>` and Cloudflare returns API error 7003.
+
+Create the token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) for that same account. The **Edit Cloudflare Workers** template is not enough, because remote migrations need D1. Use a custom token with at least:
+
+- Account · Workers Scripts · Edit
+- Account · D1 · Edit
+- User · User Details · Read
+
+If the token is missing D1, or belongs to a different account, the same 7003 error appears.

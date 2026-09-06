@@ -2,6 +2,8 @@ import { requireActiveUser } from '../../auth-session';
 import {
   acceptMateInvite,
   createMateInvite,
+  deleteOpenMateInvite,
+  getOpenMateInvite,
   peekMateInvite,
   rejectMateInvite,
   listMates,
@@ -40,6 +42,8 @@ export async function GET(request: Request) {
       data = await getBootstrap(user);
     } else if (action === 'mates') {
       data = await listMates(user.userId);
+    } else if (action === 'open-invite') {
+      data = await getOpenMateInvite(user.userId);
     } else if (action === 'context') {
       data = await getContext(requiredParam(url, 'contextId'), user.userId);
     } else if (action === 'invite') {
@@ -71,6 +75,9 @@ export async function POST(request: Request) {
     switch (action) {
       case 'create-invite':
         data = await createMateInvite(user.userId);
+        break;
+      case 'delete-invite':
+        data = await deleteOpenMateInvite(user.userId);
         break;
       case 'accept-invite':
         data = await acceptMateInvite(user.userId, body.token);

@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
-  Copy,
   History,
   Info,
   Link2,
@@ -21,6 +20,7 @@ import {
   ShieldCheck,
   Signal,
   Smartphone,
+  Trash2,
   Trophy,
   UserMinus,
   UserPlus,
@@ -49,7 +49,10 @@ import {
   guestSlotId,
   isGuestSlot,
 } from '../lib/player-identity';
+import { formatMateInviteCountdown } from '../lib/mate-invite';
 import { awardPoint } from '../lib/scoring';
+import { ShareInviteDialog } from './share-invite-dialog';
+import { useMateInviteCountdown } from './use-mate-invite-countdown';
 
 type AppUser = { id: string; displayName: string; email: string; isAdmin: boolean };
 type BootstrapData = { user: AppUser; mates: Mate[]; contexts: ContextSummary[] };
@@ -182,20 +185,45 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const [joinCode, setJoinCode] = useState('');
   const [config, setConfig] = useState<ActivityConfig>(DEFAULT_CONFIG);
   const [bluePlayerIds, setBluePlayerIds] = useState<string[]>([]);
-  const [modal, setModal] = useState<'history' | 'share' | 'manual' | null>(null);
+  const [modal, setModal] = useState<'history' | 'share' | 'mate-invite' | 'replace-invite' | 'manual' | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [matesRefreshing, setMatesRefreshing] = useState(false);
   const resumeAttempted = useRef(false);
+  const inviteRemainingMs = useMateInviteCountdown(invite?.createdAt);
+  const liveInvite = invite && inviteRemainingMs > 0 ? invite : null;
+
+  useEffect(() => {
+    if (!invite || inviteRemainingMs > 0) return;
+    setInvite(null);
+    setModal((current) => (
+      current === 'mate-invite' || current === 'replace-invite' ? null : current
+    ));
+  }, [invite, inviteRemainingMs]);
 
   const loadBootstrap = useCallback(async () => {
     const data = await apiGet<BootstrapData>('bootstrap');
     setBootstrap(data);
-    setSelectedPlayerIds((current) => {
-      const matesAndSelf = new Set([data.user.id, ...data.mates.map((mate) => mate.id)]);
-      const kept = current.filter((id) => matesAndSelf.has(id));
-      return kept.includes(data.user.id) ? kept : [data.user.id, ...kept];
-    });
+    setSelectedPlayerIds((current) => keepSelectablePlayerIds(current, data.user.id, data.mates));
   }, []);
+
+  const refreshMates = useCallback(async () => {
+    setMatesRefreshing(true);
+    setError('');
+    try {
+      const [mates, openInvite] = await Promise.all([
+        apiGet<Mate[]>('mates'),
+        apiGet<MateInviteLink | null>('open-invite'),
+      ]);
+      setBootstrap((current) => (current ? { ...current, mates } : current));
+      setInvite(openInvite);
+      setSelectedPlayerIds((current) => keepSelectablePlayerIds(current, initialUser.id, mates));
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setMatesRefreshing(false);
+    }
+  }, [initialUser.id]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -332,10 +360,14 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const createInvite = async () => {
     setBusy(true);
     setError('');
+    const replacing = Boolean(invite);
     try {
       const created = await apiPost<MateInviteLink>({ action: 'create-invite' });
       setInvite(created);
-      setNotice('Invite link ready. Share it directly with the person you want to play with.');
+      setModal('mate-invite');
+      setNotice(replacing
+        ? 'New invite link ready. The previous link no longer works.'
+        : 'Invite link ready. Share it directly with the person you want to play with.');
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -343,10 +375,20 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
     }
   };
 
-  const copyInvite = async () => {
-    if (!invite) return;
-    await navigator.clipboard.writeText(invite.url);
-    setNotice('Invite link copied.');
+  const deleteInvite = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiPost({ action: 'delete-invite' });
+      setInvite(null);
+      setModal(null);
+      setNotice('Invite link deleted.');
+    } catch (caught) {
+      setError(messageOf(caught));
+      await refreshMates().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const removeMate = async (matePlayerId: string) => {
@@ -426,7 +468,16 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
     if (!deviceId || !bootstrap) return;
     if (resumeAttempted.current) return;
     resumeAttempted.current = true;
-    const sharedCode = new URLSearchParams(window.location.search).get('join');
+    const params = new URLSearchParams(window.location.search);
+    const sharedCode = params.get('join');
+    const requestedScreen = params.get('screen');
+    if (!sharedCode && requestedScreen === 'mates') {
+      window.history.replaceState({}, '', window.location.pathname);
+      forgetContext();
+      setScreen('mates');
+      void refreshMates();
+      return;
+    }
     const savedActivityId = localStorage.getItem('padel-mate-last-activity-id');
     const savedContextId = localStorage.getItem(LAST_CONTEXT_KEY);
     const reference = sharedCode ?? savedActivityId;
@@ -464,7 +515,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
     }, 0);
     // The share code should be consumed only once after bootstrap.
     return () => window.clearTimeout(timer);
-  }, [deviceId, bootstrap, joinActivity, openContext, returnToContext]);
+  }, [deviceId, bootstrap, joinActivity, openContext, refreshMates, returnToContext]);
 
   const startSet = async () => {
     if (!activityData || bluePlayerIds.length !== 2) return;
@@ -594,6 +645,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       if (next === 'groups') setContextData(null);
     }
     setScreen(next);
+    if (next === 'mates') void refreshMates();
   };
 
   const currentUser = bootstrap?.user ?? initialUser;
@@ -609,11 +661,16 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       return (
         <MatesView
           mates={bootstrap.mates}
-          invite={invite}
+          invite={liveInvite}
+          remainingMs={inviteRemainingMs}
           onCreateInvite={createInvite}
-          onCopyInvite={copyInvite}
+          onShowInvite={() => setModal('mate-invite')}
+          onRequestReplaceInvite={() => setModal('replace-invite')}
+          onDeleteInvite={deleteInvite}
           onRemove={removeMate}
+          onRefresh={refreshMates}
           busy={busy}
+          matesRefreshing={matesRefreshing}
         />
       );
     }
@@ -682,7 +739,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         joinCode={joinCode}
         onJoinCode={setJoinCode}
         onJoin={() => joinActivity()}
-        onInviteMates={() => setScreen('mates')}
+        onInviteMates={() => navigate('mates')}
         busy={busy}
       />
     );
@@ -741,7 +798,40 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         <HistoryModal data={activityData} onClose={() => setModal(null)} />
       )}
       {modal === 'share' && activityData && (
-        <ShareModal data={activityData} onClose={() => setModal(null)} />
+        <ShareInviteDialog
+          title="Invite the second device"
+          description="Only two connected or reserved devices can use this activity."
+          valueLabel="Session code"
+          displayValue={activityData.activity.shareCode}
+          copyValue={`${window.location.origin}/?join=${activityData.activity.shareCode}`}
+          whatsappMessage={`Join Padel Mate ${activityTitle(activityData.activity.activityNumber).toLowerCase()}. ${window.location.origin}/?join=${activityData.activity.shareCode}`}
+          devices={activityData.devices}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'mate-invite' && liveInvite && (
+        <ShareInviteDialog
+          title="Invite a mate"
+          description="Share this single-use link. There is no directory to search."
+          valueLabel="Invite link"
+          displayValue={liveInvite.url}
+          copyValue={liveInvite.url}
+          whatsappMessage={`Join me on Padel Mate: ${liveInvite.url}`}
+          valueStyle="link"
+          expiryLabel={`Expires in ${formatMateInviteCountdown(inviteRemainingMs)}`}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'replace-invite' && (
+        <ConfirmDialog
+          title="Replace this invite link?"
+          description="Creating a new link deletes the current one. Anyone with the old link will not be able to use it."
+          confirmLabel="Create new invite"
+          cancelLabel="Cancel"
+          onConfirm={() => void createInvite()}
+          onCancel={() => setModal(null)}
+          busy={busy}
+        />
       )}
       {modal === 'manual' && activityData && (
         <ManualSetDialog
@@ -922,17 +1012,27 @@ function GroupsView({
 function MatesView({
   mates,
   invite,
+  remainingMs,
   onCreateInvite,
-  onCopyInvite,
+  onShowInvite,
+  onRequestReplaceInvite,
+  onDeleteInvite,
   onRemove,
+  onRefresh,
   busy,
+  matesRefreshing,
 }: {
   mates: Mate[];
   invite: MateInviteLink | null;
+  remainingMs: number;
   onCreateInvite: () => void;
-  onCopyInvite: () => void;
+  onShowInvite: () => void;
+  onRequestReplaceInvite: () => void;
+  onDeleteInvite: () => void;
   onRemove: (id: string) => void;
+  onRefresh: () => void;
   busy: boolean;
+  matesRefreshing: boolean;
 }) {
   return (
     <main className="page-content narrow-page">
@@ -944,21 +1044,44 @@ function MatesView({
         </div>
       </section>
       <section className="add-player-band">
-        <label htmlFor="invite-link">Invite link</label>
+        <label>Invite link</label>
         {invite ? (
-          <div>
-            <input id="invite-link" value={invite.url} readOnly />
-            <button className="primary-button" onClick={onCopyInvite}><Copy size={18} /> Copy</button>
-          </div>
+          <>
+            <div className="invite-actions">
+              <div className="invite-actions-main">
+                <button className="primary-button" onClick={onShowInvite}><Link2 size={18} /> Show current invite link</button>
+                <button className="secondary-button" onClick={onRequestReplaceInvite} disabled={busy}>
+                  <Link2 size={18} /> Create new invite
+                </button>
+              </div>
+              <button
+                type="button"
+                className="icon-text-button invite-delete"
+                onClick={onDeleteInvite}
+                disabled={busy}
+                aria-label="Delete invite link"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+            <p className="invite-expiry">Expires in {formatMateInviteCountdown(remainingMs)}</p>
+          </>
         ) : (
           <div>
             <button className="primary-button" onClick={onCreateInvite} disabled={busy}><Link2 size={18} /> Create invite link</button>
           </div>
         )}
-        {invite && <p className="invite-expiry">Expires {formatDate(invite.expiresAt)}. Creating another link leaves this one valid until it is used or expires.</p>}
       </section>
       <section className="player-directory">
-        <div className="section-title"><h2>Mates</h2><span>{mates.length}</span></div>
+        <div className="section-title">
+          <h2>Mates</h2>
+          <div className="section-title-actions">
+            <span>{mates.length}</span>
+            <button className="icon-text-button" onClick={onRefresh} disabled={matesRefreshing}>
+              <RefreshCw size={18} /> Refresh
+            </button>
+          </div>
+        </div>
         {mates.length === 0 ? (
           <div className="empty-line">No mates yet. Share an invite link to add someone.</div>
         ) : mates.map((mate, index) => (
@@ -1324,10 +1447,11 @@ function StatusIndicator({ status }: { status: SaveStatus }) {
   return <span className="save-indicator saved"><CheckCircle2 size={15} /> Saved</span>;
 }
 
-function ConfirmDialog({ title, description, confirmLabel, onConfirm, onCancel, busy }: {
+function ConfirmDialog({ title, description, confirmLabel, cancelLabel = 'Cancel result', onConfirm, onCancel, busy }: {
   title: string;
   description: string;
   confirmLabel: string;
+  cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
   busy: boolean;
@@ -1338,7 +1462,7 @@ function ConfirmDialog({ title, description, confirmLabel, onConfirm, onCancel, 
         <span className="dialog-icon"><Trophy size={23} /></span>
         <h2 id="confirm-title">{title}</h2>
         <p>{description}</p>
-        <div className="dialog-actions"><button className="secondary-button" onClick={onCancel} disabled={busy}>Cancel result</button><button className="primary-button" onClick={onConfirm} disabled={busy}><Check size={18} /> {confirmLabel}</button></div>
+        <div className="dialog-actions"><button className="secondary-button" onClick={onCancel} disabled={busy}>{cancelLabel}</button><button className="primary-button" onClick={onConfirm} disabled={busy}><Check size={18} /> {confirmLabel}</button></div>
       </div>
     </div>
   );
@@ -1384,32 +1508,6 @@ function HistoryModal({ data, onClose }: { data: ActivityData; onClose: () => vo
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ShareModal({ data, onClose }: { data: ActivityData; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const link = typeof window === 'undefined' ? '' : `${window.location.origin}/?join=${data.activity.shareCode}`;
-  const message = `Join Padel Mate ${activityTitle(data.activity.activityNumber).toLowerCase()}. Session code: ${data.activity.shareCode}. ${link}`;
-  const copy = async () => {
-    await navigator.clipboard.writeText(message);
-    setCopied(true);
-  };
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <div className="dialog share-dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
-        <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
-        <span className="dialog-icon"><Link2 size={23} /></span>
-        <h2 id="share-title">Invite the second device</h2>
-        <p>Only two connected or reserved devices can use this activity.</p>
-        <div className="share-code"><span>Session code</span><strong>{data.activity.shareCode}</strong></div>
-        <div className="share-actions">
-          <button className="primary-button" onClick={copy}>{copied ? <Check size={18} /> : <Copy size={18} />}{copied ? 'Copied' : 'Copy invite'}</button>
-          <a className="whatsapp-button" href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer"><Share2 size={18} /> WhatsApp</a>
-        </div>
-        <div className="device-slots">{data.devices.map((device) => <div key={device.deviceId}><Smartphone size={17} /><span><strong>{device.deviceLabel}</strong><small>{device.slotStatus}</small></span></div>)}</div>
       </div>
     </div>
   );
@@ -1486,6 +1584,12 @@ function matchSlotsFrom(players: Player[]): Player[] {
 
 function firstTwoSlotIds(players: Player[]) {
   return matchSlotsFrom(players).slice(0, 2).map((player) => player.id);
+}
+
+function keepSelectablePlayerIds(current: string[], selfId: string, mates: Mate[]) {
+  const matesAndSelf = new Set([selfId, ...mates.map((mate) => mate.id)]);
+  const kept = current.filter((id) => matesAndSelf.has(id));
+  return kept.includes(selfId) ? kept : [selfId, ...kept];
 }
 
 function selectablePlayers(bootstrap: BootstrapData): Player[] {
