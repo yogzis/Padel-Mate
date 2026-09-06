@@ -104,6 +104,13 @@ type ActivityData = {
 type Screen = 'groups' | 'mates' | 'context' | 'configure' | 'set-setup' | 'scoreboard';
 type SaveStatus = 'saved' | 'saving' | 'retry' | 'offline';
 
+function landingScreen(): Screen {
+  if (typeof window === 'undefined') return 'groups';
+  const params = new URLSearchParams(window.location.search);
+  if (!params.get('join') && params.get('screen') === 'mates') return 'mates';
+  return 'groups';
+}
+
 const LIVE_POLL_MS = 1500;
 const SETUP_POLL_MS = 5_000;
 const LAST_CONTEXT_KEY = 'padel-mate-last-context-id';
@@ -168,7 +175,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [contextData, setContextData] = useState<ContextData | null>(null);
   const [activityData, setActivityData] = useState<ActivityData | null>(null);
-  const [screen, setScreen] = useState<Screen>('groups');
+  const [screen, setScreen] = useState<Screen>(landingScreen);
   const [deviceId] = useState(() => {
     if (typeof window === 'undefined') return '';
     const existing = localStorage.getItem('padel-mate-device-id');
@@ -192,14 +199,6 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const resumeAttempted = useRef(false);
   const inviteRemainingMs = useMateInviteCountdown(invite?.createdAt);
   const liveInvite = invite && inviteRemainingMs > 0 ? invite : null;
-
-  useEffect(() => {
-    if (!invite || inviteRemainingMs > 0) return;
-    setInvite(null);
-    setModal((current) => (
-      current === 'mate-invite' || current === 'replace-invite' ? null : current
-    ));
-  }, [invite, inviteRemainingMs]);
 
   const loadBootstrap = useCallback(async () => {
     const data = await apiGet<BootstrapData>('bootstrap');
@@ -360,7 +359,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const createInvite = async () => {
     setBusy(true);
     setError('');
-    const replacing = Boolean(invite);
+    const replacing = Boolean(liveInvite);
     try {
       const created = await apiPost<MateInviteLink>({ action: 'create-invite' });
       setInvite(created);
@@ -474,9 +473,10 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
     if (!sharedCode && requestedScreen === 'mates') {
       window.history.replaceState({}, '', window.location.pathname);
       forgetContext();
-      setScreen('mates');
-      void refreshMates();
-      return;
+      const timer = window.setTimeout(() => {
+        void refreshMates();
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     const savedActivityId = localStorage.getItem('padel-mate-last-activity-id');
     const savedContextId = localStorage.getItem(LAST_CONTEXT_KEY);
@@ -822,7 +822,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
           onClose={() => setModal(null)}
         />
       )}
-      {modal === 'replace-invite' && (
+      {modal === 'replace-invite' && liveInvite && (
         <ConfirmDialog
           title="Replace this invite link?"
           description="Creating a new link deletes the current one. Anyone with the old link will not be able to use it."
