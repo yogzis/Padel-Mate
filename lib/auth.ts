@@ -1,11 +1,11 @@
-import { betterAuth } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { nextCookies } from 'better-auth/next-js';
-import { admin } from 'better-auth/plugins/admin';
-import { getDb } from '../db';
-import * as schema from '../db/schema';
-import { ADMIN_ROLE, isAdminEmail } from './admin-access';
-import { ensurePlayerRecord } from './server/players';
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { nextCookies } from "better-auth/next-js";
+import { admin } from "better-auth/plugins/admin";
+import { getDb } from "../db";
+import * as schema from "../db/schema";
+import { ADMIN_ROLE, isAdminEmail } from "./admin-access";
+import { ensurePlayerRecord } from "./server/players";
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
@@ -13,12 +13,12 @@ export const auth = betterAuth({
 
   // D1 has no interactive transactions, so the adapter must stay in its default
   // sequential mode. Setting `transaction: true` here would break every write.
-  database: drizzleAdapter(getDb(), { provider: 'sqlite', schema }),
+  database: drizzleAdapter(getDb(), { provider: "sqlite", schema }),
 
   socialProviders: {
     google: {
-      clientId: process.env.GOOGLE_CLIENT_ID ?? '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
     },
   },
 
@@ -39,7 +39,10 @@ export const auth = betterAuth({
           try {
             await ensurePlayerRecord(user.id, user.name, user.email);
           } catch (error) {
-            console.error('Could not create the player record at signup', error);
+            console.error(
+              "Could not create the player record at signup",
+              error,
+            );
           }
         },
       },
