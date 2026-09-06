@@ -163,15 +163,20 @@ flowchart TD
 
 ## 1.0.2 Deployment Flow
 
+Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub ruleset setting. Push to `production` still deploys.
+
 ```mermaid
-flowchart LR
-  A[Push to production] --> B[GitHub Actions]
-  B --> C[npm ci]
-  C --> D[lint, test, tsc]
-  D --> E[npm run build]
-  E --> F[D1 migrations --remote]
-  F --> G["wrangler deploy --config dist/server/wrangler.json"]
-  G --> H[Cloudflare Worker + D1]
+flowchart TD
+  A[PR into development or production] --> B[CI check]
+  B --> C[lint, test, tsc]
+  C -->|fail| D[Merge blocked if required]
+  C -->|pass| E[Merge]
+  E --> F[Push to production]
+  F --> G[Deploy workflow]
+  G --> H[lint, test, tsc, build]
+  H --> I[D1 migrations --remote]
+  I --> J["wrangler deploy --config dist/server/wrangler.json"]
+  J --> K[Cloudflare Worker + D1]
 ```
 
 ## 1.1 Reload Recovery Flow
