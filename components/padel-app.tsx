@@ -9,18 +9,22 @@ import {
   Clock3,
   Copy,
   History,
+  Info,
   Link2,
   LogOut,
   Medal,
   Menu,
   Plus,
+  RefreshCw,
   RotateCcw,
   Share2,
   ShieldCheck,
   Signal,
   Smartphone,
   Trophy,
-  UserRoundCheck,
+  UserMinus,
+  UserPlus,
+  Users,
   UsersRound,
   WifiOff,
   X,
@@ -31,34 +35,45 @@ import type {
   ContextSummary,
   LeaderboardEntry,
   LiveActivityState,
-  PlayerProfile,
+  Mate,
+  MateInviteLink,
+  Player,
   ScoreEvent,
   SetLogEntry,
   TeamId,
 } from '../lib/domain';
+import { authClient } from '../lib/auth-client';
+import {
+  MATCH_SLOT_COUNT,
+  MIN_REGISTERED_PLAYERS_PER_CONTEXT,
+  guestSlotId,
+  isGuestSlot,
+} from '../lib/player-identity';
 import { awardPoint } from '../lib/scoring';
 
-type AppUser = { id: string; displayName: string; email: string };
-type BootstrapData = { user: AppUser; players: PlayerProfile[]; contexts: ContextSummary[] };
+type AppUser = { id: string; displayName: string; email: string; isAdmin: boolean };
+type BootstrapData = { user: AppUser; mates: Mate[]; contexts: ContextSummary[] };
 type ContextData = {
   context: ContextSummary;
-  players: PlayerProfile[];
+  players: Player[];
   leaderboard: LeaderboardEntry[];
   logs: SetLogEntry[];
   activities: Array<{
     id: string;
-    activityNumber: number;
+    activityNumber: number | null;
     status: string;
     startedAt: string;
     updatedAt: string;
     shareCode: string;
+    viewerAccepted: boolean;
   }>;
+  canCreateActivity: boolean;
 };
 type ActivityData = {
   activity: {
     id: string;
     contextId: string;
-    activityNumber: number;
+    activityNumber: number | null;
     status: 'active' | 'completed' | 'abandoned';
     config: ActivityConfig;
     shareCode: string;
@@ -69,7 +84,7 @@ type ActivityData = {
     abandonedAt: string | null;
   };
   context: ContextSummary;
-  players: PlayerProfile[];
+  players: Player[];
   devices: Array<{
     deviceId: string;
     deviceLabel: string;
@@ -80,18 +95,29 @@ type ActivityData = {
   }>;
   logs: SetLogEntry[];
   history: ScoreEvent[];
+  acceptedPlayerIds: string[];
+  pendingPlayerIds: string[];
 };
-type Screen = 'groups' | 'players' | 'context' | 'configure' | 'set-setup' | 'scoreboard';
+type Screen = 'groups' | 'mates' | 'context' | 'configure' | 'set-setup' | 'scoreboard';
 type SaveStatus = 'saved' | 'saving' | 'retry' | 'offline';
 
+const LIVE_POLL_MS = 1500;
+const SETUP_POLL_MS = 5_000;
+const LAST_CONTEXT_KEY = 'padel-mate-last-context-id';
+
 const DEFAULT_CONFIG: ActivityConfig = {
-  deuceRule: 'classic-advantage',
+  deuceRule: 'star-point',
   setWinRule: 'standard-set',
   tieBreakRule: 'standard-tiebreak',
   pointsFormula: 'default-margin',
 };
 
 const DEUCE_OPTIONS = [
+  {
+    value: 'star-point' as const,
+    label: 'Star Point',
+    description: 'After two lost Advantage cycles, the next deuce point decides the game.',
+  },
   {
     value: 'classic-advantage' as const,
     label: 'Classic Advantage',
@@ -101,11 +127,6 @@ const DEUCE_OPTIONS = [
     value: 'golden-point' as const,
     label: 'Golden Point',
     description: 'At 40-40, the next point wins the game.',
-  },
-  {
-    value: 'star-point' as const,
-    label: 'Star Point',
-    description: 'After two lost Advantage cycles, the next deuce point decides the game.',
   },
 ];
 
@@ -140,7 +161,7 @@ const TIEBREAK_OPTIONS = [
   },
 ];
 
-export default function PadelApp({ initialUser, signOutPath }: { initialUser: AppUser; signOutPath: string }) {
+export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [contextData, setContextData] = useState<ContextData | null>(null);
   const [activityData, setActivityData] = useState<ActivityData | null>(null);
@@ -156,8 +177,8 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
-  const [newPlayerName, setNewPlayerName] = useState('');
+  const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([initialUser.id]);
+  const [invite, setInvite] = useState<MateInviteLink | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [config, setConfig] = useState<ActivityConfig>(DEFAULT_CONFIG);
   const [bluePlayerIds, setBluePlayerIds] = useState<string[]>([]);
@@ -169,6 +190,11 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
   const loadBootstrap = useCallback(async () => {
     const data = await apiGet<BootstrapData>('bootstrap');
     setBootstrap(data);
+    setSelectedPlayerIds((current) => {
+      const matesAndSelf = new Set([data.user.id, ...data.mates.map((mate) => mate.id)]);
+      const kept = current.filter((id) => matesAndSelf.has(id));
+      return kept.includes(data.user.id) ? kept : [data.user.id, ...kept];
+    });
   }, []);
 
   useEffect(() => {
@@ -178,27 +204,104 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     return () => window.clearTimeout(timer);
   }, [loadBootstrap]);
 
+  const openContext = useCallback(async (contextId: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      const data = await apiGet<ContextData>('context', { contextId });
+      setContextData(data);
+      rememberContext(data.context.id);
+      setScreen('context');
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const refreshContext = useCallback(async (contextId: string) => {
+    try {
+      const data = await apiGet<ContextData>('context', { contextId });
+      setContextData((current) => {
+        if (!current || current.context.id !== contextId) return current;
+        return data;
+      });
+    } catch {
+      // Keep the last good dashboard snapshot if a poll fails.
+    }
+  }, []);
+
+  const returnToContext = useCallback(async (
+    contextId: string,
+    activityId: string,
+    noticeText = 'This activity has already finished.',
+  ) => {
+    forgetActivity(activityId);
+    setActivityData(null);
+    setModal(null);
+    await loadBootstrap().catch(() => undefined);
+    await openContext(contextId);
+    setNotice(noticeText);
+  }, [loadBootstrap, openContext]);
+
   const activeActivityId = activityData?.activity.status === 'active' ? activityData.activity.id : null;
+  const pollMs = activityData?.activity.status === 'active' && activityData.activity.state.phase === 'live'
+    ? LIVE_POLL_MS
+    : SETUP_POLL_MS;
+
+  const refreshActivity = useCallback(async () => {
+    if (!activeActivityId || !deviceId) return null;
+    try {
+      const fresh = await apiGet<ActivityData>('activity', {
+        activityId: activeActivityId,
+        deviceId,
+      });
+      if (fresh.activity.status === 'completed') {
+        await returnToContext(fresh.activity.contextId, fresh.activity.id);
+        return fresh;
+      }
+      rememberActivity(fresh);
+      setActivityData((current) => {
+        if (current && fresh.activity.version < current.activity.version) return current;
+        return fresh;
+      });
+      setSaveStatus('saved');
+      if (fresh.activity.status === 'active' && fresh.activity.state.phase === 'live') {
+        setScreen('scoreboard');
+      } else if (fresh.activity.status === 'active' && fresh.activity.state.phase === 'set-setup') {
+        setScreen((current) => (current === 'scoreboard' ? 'set-setup' : current));
+      }
+      return fresh;
+    } catch {
+      setSaveStatus('offline');
+      return null;
+    }
+  }, [activeActivityId, deviceId, returnToContext]);
+
   useEffect(() => {
     if (!activeActivityId || !deviceId) return;
-    const id = window.setInterval(async () => {
-      try {
-        const fresh = await apiGet<ActivityData>('activity', {
-          activityId: activeActivityId,
-          deviceId,
-        });
-        rememberActivity(fresh);
-        setActivityData((current) => {
-          if (!current || fresh.activity.version >= current.activity.version) return fresh;
-          return current;
-        });
-        setSaveStatus('saved');
-      } catch {
-        setSaveStatus('offline');
-      }
-    }, 1500);
+    const id = window.setInterval(() => {
+      void refreshActivity();
+    }, pollMs);
     return () => window.clearInterval(id);
-  }, [activeActivityId, deviceId]);
+  }, [activeActivityId, deviceId, pollMs, refreshActivity]);
+
+  useEffect(() => {
+    if (screen !== 'context' || !contextData?.context.id) return;
+    const contextId = contextData.context.id;
+    const pollDashboard = () => {
+      void refreshContext(contextId);
+    };
+    const id = window.setInterval(pollDashboard, SETUP_POLL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') pollDashboard();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [contextData?.context.id, refreshContext, screen]);
 
   useEffect(() => {
     if (!notice) return;
@@ -206,30 +309,17 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const openContext = async (contextId: string) => {
-    setBusy(true);
-    setError('');
-    try {
-      const data = await apiGet<ContextData>('context', { contextId });
-      setContextData(data);
-      setScreen('context');
-    } catch (caught) {
-      setError(messageOf(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const createOrOpenContext = async () => {
-    if (selectedPlayerIds.length !== 4) {
-      setError('Choose exactly four players for this scoring group.');
+    if (selectedPlayerIds.length < MIN_REGISTERED_PLAYERS_PER_CONTEXT) {
+      setError('Choose at least one mate so two registered players are in the match.');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      const data = await apiPost<ContextData>({ action: 'select-context', playerIds: selectedPlayerIds });
+      const data = await apiPost<ContextData>({ action: 'select-context', slotIds: slotIdsFor(selectedPlayerIds) });
       setContextData(data);
+      rememberContext(data.context.id);
       await loadBootstrap();
       setScreen('context');
     } catch (caught) {
@@ -239,15 +329,13 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     }
   };
 
-  const addPlayer = async () => {
-    if (!newPlayerName.trim()) return;
+  const createInvite = async () => {
     setBusy(true);
     setError('');
     try {
-      const player = await apiPost<PlayerProfile>({ action: 'create-player', name: newPlayerName });
-      setBootstrap((current) => current ? { ...current, players: [...current.players, player].sort(nameSort) } : current);
-      setNewPlayerName('');
-      setNotice(`${player.name} was added.`);
+      const created = await apiPost<MateInviteLink>({ action: 'create-invite' });
+      setInvite(created);
+      setNotice('Invite link ready. Share it directly with the person you want to play with.');
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -255,13 +343,20 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     }
   };
 
-  const linkMe = async (playerId: string) => {
+  const copyInvite = async () => {
+    if (!invite) return;
+    await navigator.clipboard.writeText(invite.url);
+    setNotice('Invite link copied.');
+  };
+
+  const removeMate = async (matePlayerId: string) => {
     setBusy(true);
     setError('');
     try {
-      await apiPost({ action: 'link-player', playerId });
+      await apiPost({ action: 'remove-mate', matePlayerId });
       await loadBootstrap();
-      setNotice('Player profile linked to your account.');
+      setSelectedPlayerIds((current) => current.filter((id) => id !== matePlayerId));
+      setNotice('Mate removed.');
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -282,7 +377,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
       });
       setActivityData(data);
       rememberActivity(data);
-      setBluePlayerIds(data.players.slice(0, 2).map((player) => player.id));
+      setBluePlayerIds(firstTwoSlotIds(data.players));
       setScreen('set-setup');
     } catch (caught) {
       setError(messageOf(caught));
@@ -301,12 +396,17 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
         activityRef: reference.trim(),
         deviceId,
       });
+      if (data.activity.status === 'completed') {
+        await returnToContext(data.activity.contextId, data.activity.id);
+        setJoinCode('');
+        return data;
+      }
       setActivityData(data);
       rememberActivity(data);
       setContextData(null);
       setBluePlayerIds(data.activity.state.bluePlayerIds.length === 2
         ? data.activity.state.bluePlayerIds
-        : data.players.slice(0, 2).map((player) => player.id));
+        : firstTwoSlotIds(data.players));
       setScreen(data.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup');
       if (data.activity.status === 'abandoned' && data.activity.state.phase === 'live') {
         setModal('manual');
@@ -320,7 +420,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     } finally {
       setBusy(false);
     }
-  }, [deviceId, joinCode]);
+  }, [deviceId, joinCode, returnToContext]);
 
   useEffect(() => {
     if (!deviceId || !bootstrap) return;
@@ -328,28 +428,43 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     resumeAttempted.current = true;
     const sharedCode = new URLSearchParams(window.location.search).get('join');
     const savedActivityId = localStorage.getItem('padel-mate-last-activity-id');
+    const savedContextId = localStorage.getItem(LAST_CONTEXT_KEY);
     const reference = sharedCode ?? savedActivityId;
-    if (!reference) return;
+    const restoreLastContext = () => {
+      if (savedContextId) void openContext(savedContextId);
+    };
+    if (!reference) {
+      restoreLastContext();
+      return;
+    }
     if (sharedCode) window.history.replaceState({}, '', window.location.pathname);
     const timer = window.setTimeout(() => {
       joinActivity(reference).then((joined) => {
         if (joined) return;
-        if (!savedActivityId) return;
-        const cached = localStorage.getItem(`padel-mate-recovery-${savedActivityId}`);
-        if (!cached) return;
-        try {
-          const restored = JSON.parse(cached) as ActivityData;
-          setActivityData(restored);
-          setSaveStatus('offline');
-          setScreen(restored.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup');
-        } catch {
-          localStorage.removeItem(`padel-mate-recovery-${savedActivityId}`);
+        if (savedActivityId) {
+          const cached = localStorage.getItem(`padel-mate-recovery-${savedActivityId}`);
+          if (cached) {
+            try {
+              const restored = JSON.parse(cached) as ActivityData;
+              if (restored.activity.status === 'completed') {
+                void returnToContext(restored.activity.contextId, restored.activity.id);
+                return;
+              }
+              setActivityData(restored);
+              setSaveStatus('offline');
+              setScreen(restored.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup');
+              return;
+            } catch {
+              localStorage.removeItem(`padel-mate-recovery-${savedActivityId}`);
+            }
+          }
         }
+        restoreLastContext();
       });
     }, 0);
     // The share code should be consumed only once after bootstrap.
     return () => window.clearTimeout(timer);
-  }, [deviceId, bootstrap, joinActivity]);
+  }, [deviceId, bootstrap, joinActivity, openContext, returnToContext]);
 
   const startSet = async () => {
     if (!activityData || bluePlayerIds.length !== 2) return;
@@ -441,12 +556,11 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     setBusy(true);
     try {
       await apiPost({ action: 'finish-activity', activityId: activityData.activity.id, deviceId });
-      const contextId = activityData.activity.contextId;
-      forgetActivity(activityData.activity.id);
-      setActivityData(null);
-      await loadBootstrap();
-      await openContext(contextId);
-      setNotice('Activity finished and saved.');
+      await returnToContext(
+        activityData.activity.contextId,
+        activityData.activity.id,
+        'Activity finished and saved.',
+      );
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -460,6 +574,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
       await apiPost({ action: 'leave-activity', activityId: activityData.activity.id, deviceId });
     } finally {
       forgetActivity(activityData.activity.id);
+      forgetContext();
       setActivityData(null);
       setContextData(null);
       setMenuOpen(false);
@@ -474,21 +589,30 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
       return;
     }
     setMenuOpen(false);
+    if (next === 'groups' || next === 'mates') {
+      forgetContext();
+      if (next === 'groups') setContextData(null);
+    }
     setScreen(next);
   };
 
   const currentUser = bootstrap?.user ?? initialUser;
+
+  const signOut = async () => {
+    await authClient.signOut();
+    window.location.href = '/sign-in';
+  };
+
   const main = (() => {
     if (!bootstrap) return <LoadingView />;
-    if (screen === 'players') {
+    if (screen === 'mates') {
       return (
-        <PlayersView
-          players={bootstrap.players}
-          user={currentUser}
-          name={newPlayerName}
-          onNameChange={setNewPlayerName}
-          onAdd={addPlayer}
-          onLink={linkMe}
+        <MatesView
+          mates={bootstrap.mates}
+          invite={invite}
+          onCreateInvite={createInvite}
+          onCopyInvite={copyInvite}
+          onRemove={removeMate}
           busy={busy}
         />
       );
@@ -501,7 +625,10 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
         <ConfigurationView
           config={config}
           onChange={setConfig}
-          onBack={() => setScreen('context')}
+          onBack={() => {
+            setScreen('context');
+            void refreshContext(contextData.context.id);
+          }}
           onStart={createActivity}
           busy={busy}
         />
@@ -515,6 +642,16 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
           onBlueChange={setBluePlayerIds}
           onStart={startSet}
           onShare={() => setModal('share')}
+          onRefresh={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              const fresh = await refreshActivity();
+              if (fresh) setNotice('Activity updated.');
+            } finally {
+              setBusy(false);
+            }
+          }}
           onFinish={finishActivity}
           busy={busy}
         />
@@ -539,13 +676,13 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
       <GroupsView
         bootstrap={bootstrap}
         selectedIds={selectedPlayerIds}
-        onToggle={(id) => setSelectedPlayerIds((current) => togglePlayer(current, id))}
+        onToggle={(id) => setSelectedPlayerIds((current) => toggleRegistered(current, id, currentUser.id))}
         onContinue={createOrOpenContext}
         onOpen={openContext}
         joinCode={joinCode}
         onJoinCode={setJoinCode}
         onJoin={() => joinActivity()}
-        onAddPlayers={() => setScreen('players')}
+        onInviteMates={() => setScreen('mates')}
         busy={busy}
       />
     );
@@ -555,7 +692,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
     <div className={`app-shell ${screen === 'scoreboard' ? 'scoreboard-shell' : ''}`}>
       <AppHeader
         user={currentUser}
-        signOutPath={signOutPath}
+        onSignOut={signOut}
         screen={screen}
         activity={activityData}
         menuOpen={menuOpen}
@@ -591,7 +728,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
           onConfirm={async () => {
             const result = await activityAction('confirm-set');
             if (result) {
-              setBluePlayerIds(result.players.slice(0, 2).map((player) => player.id));
+              setBluePlayerIds(firstTwoSlotIds(result.players));
               setScreen('set-setup');
             }
           }}
@@ -615,7 +752,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
             const result = await activityAction('manual-set', { choice });
             if (result) {
               setModal(null);
-              setBluePlayerIds(result.players.slice(0, 2).map((player) => player.id));
+              setBluePlayerIds(firstTwoSlotIds(result.players));
               setScreen('set-setup');
             }
           }}
@@ -627,7 +764,7 @@ export default function PadelApp({ initialUser, signOutPath }: { initialUser: Ap
 
 function AppHeader({
   user,
-  signOutPath,
+  onSignOut,
   screen,
   activity,
   menuOpen,
@@ -636,7 +773,7 @@ function AppHeader({
   onLeave,
 }: {
   user: AppUser;
-  signOutPath: string;
+  onSignOut: () => void;
   screen: Screen;
   activity: ActivityData | null;
   menuOpen: boolean;
@@ -654,16 +791,16 @@ function AppHeader({
 
         <nav className="desktop-nav" aria-label="Main navigation">
           <button className={screen === 'groups' || screen === 'context' ? 'active' : ''} onClick={() => onNavigate('groups')}>Groups</button>
-          <button className={screen === 'players' ? 'active' : ''} onClick={() => onNavigate('players')}>Players</button>
+          <button className={screen === 'mates' ? 'active' : ''} onClick={() => onNavigate('mates')}>Mates</button>
         </nav>
 
         <div className="header-actions">
           {activity?.activity.status === 'active' && (
             <button className="live-pill" onClick={() => onNavigate(activity.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup')}>
-              <span /> Activity #{activity.activity.activityNumber}
+              <span /> {activityTitle(activity.activity.activityNumber)}
             </button>
           )}
-          <button className="menu-button" onClick={onMenu} aria-label="Open account menu" aria-expanded={menuOpen}>
+          <button className="menu-button" onClick={onMenu} aria-label="Open menu" aria-expanded={menuOpen}>
             <Menu size={20} />
           </button>
           {menuOpen && (
@@ -672,9 +809,17 @@ function AppHeader({
                 <span className="avatar avatar-1">{initials(user.displayName)}</span>
                 <div><strong>{displayName(user.displayName)}</strong><small>{user.email}</small></div>
               </div>
-              <button onClick={() => onNavigate('players')}><UsersRound size={17} /> Manage players</button>
+              <nav className="menu-nav" aria-label="Main navigation">
+                <button className={screen === 'groups' || screen === 'context' ? 'active' : ''} onClick={() => onNavigate('groups')}>
+                  <Users size={17} /> Groups
+                </button>
+                <button className={screen === 'mates' ? 'active' : ''} onClick={() => onNavigate('mates')}>
+                  <UsersRound size={17} /> Mates
+                </button>
+              </nav>
+              {user.isAdmin && <a href="/admin"><ShieldCheck size={17} /> Manage accounts</a>}
               {activity?.activity.status === 'active' && <button onClick={onLeave}><LogOut size={17} /> Leave activity</button>}
-              <a href={signOutPath}><LogOut size={17} /> Sign out</a>
+              <button onClick={onSignOut}><LogOut size={17} /> Sign out</button>
             </div>
           )}
         </div>
@@ -692,7 +837,7 @@ function GroupsView({
   joinCode,
   onJoinCode,
   onJoin,
-  onAddPlayers,
+  onInviteMates,
   busy,
 }: {
   bootstrap: BootstrapData;
@@ -703,9 +848,12 @@ function GroupsView({
   joinCode: string;
   onJoinCode: (value: string) => void;
   onJoin: () => void;
-  onAddPlayers: () => void;
+  onInviteMates: () => void;
   busy: boolean;
 }) {
+  const selectable = selectablePlayers(bootstrap);
+  const canOpen = selectedIds.length >= MIN_REGISTERED_PLAYERS_PER_CONTEXT;
+
   return (
     <main className="page-content">
       <section className="page-heading">
@@ -720,42 +868,50 @@ function GroupsView({
         <section className="section-band">
           <div className="section-title"><h2>Your scoring groups</h2><span>{bootstrap.contexts.length}</span></div>
           <div className="group-list">
-            {bootstrap.contexts.map((context) => {
-              const players = context.playerIds.map((id) => bootstrap.players.find((player) => player.id === id)).filter(Boolean) as PlayerProfile[];
-              return (
-                <button key={context.id} className="group-row" onClick={() => onOpen(context.id)}>
-                  <div className="avatar-stack">{players.map((player, index) => <span key={player.id} className={`avatar avatar-${index + 1}`}>{initials(player.name)}</span>)}</div>
-                  <div className="group-copy"><strong>{groupName(players)}</strong><span>{players.map((player) => player.name).join(', ')}</span></div>
-                  <ChevronRight size={20} />
-                </button>
-              );
-            })}
+            {bootstrap.contexts.map((context) => (
+              <button key={context.id} className="group-row" onClick={() => onOpen(context.id)}>
+                <div className="avatar-stack">{context.playerIds.slice(0, 4).map((id, index) => (
+                  <span key={id} className={`avatar avatar-${index + 1}`}>{initials(nameForContextMember(bootstrap, id))}</span>
+                ))}</div>
+                <div className="group-copy"><strong>{context.name}</strong><span>{context.playerIds.length} registered{context.playerIds.length < MATCH_SLOT_COUNT ? ` · ${MATCH_SLOT_COUNT - context.playerIds.length} guest${MATCH_SLOT_COUNT - context.playerIds.length > 1 ? 's' : ''}` : ''}</span></div>
+                <ChevronRight size={20} />
+              </button>
+            ))}
           </div>
         </section>
       )}
 
       <section className="context-builder">
         <div className="builder-heading">
-          <div><h2>Create or find a scoring group</h2><p>Select the exact four players. The matching leaderboard opens automatically.</p></div>
-          <span className={selectedIds.length === 4 ? 'selection-count complete' : 'selection-count'}>{selectedIds.length}/4</span>
+          <div><h2>Create or find a scoring group</h2><p>Pick two to four people. If you pick fewer than four, the remaining court spots are guests and do not rank.</p></div>
+          <span className={canOpen ? 'selection-count complete' : 'selection-count'}>{selectedIds.length} of 2–4 selected</span>
         </div>
-        {bootstrap.players.length === 0 ? (
-          <div className="empty-state"><UsersRound size={28} /><h3>Add your players first</h3><button className="primary-button" onClick={onAddPlayers}><Plus size={18} /> Add players</button></div>
+        {bootstrap.mates.length === 0 ? (
+          <div className="empty-state"><UsersRound size={28} /><h3>Invite a mate to start scoring</h3><p>A match needs at least two registered players. Guests can fill the other slots.</p><button className="primary-button" onClick={onInviteMates}><UserPlus size={18} /> Invite mates</button></div>
         ) : (
           <>
             <div className="player-pick-grid">
-              {bootstrap.players.map((player, index) => {
+              {selectable.map((player, index) => {
                 const selected = selectedIds.includes(player.id);
+                const isYou = player.id === bootstrap.user.id;
                 return (
-                  <button key={player.id} className={`player-pick ${selected ? 'selected' : ''}`} onClick={() => onToggle(player.id)} disabled={!selected && selectedIds.length === 4}>
+                  <button
+                    key={player.id}
+                    className={`player-pick ${selected ? 'selected' : ''}`}
+                    onClick={() => onToggle(player.id)}
+                    disabled={isYou || (!selected && selectedIds.length === MATCH_SLOT_COUNT)}
+                  >
                     <span className={`avatar avatar-${index % 4 + 1}`}>{initials(player.name)}</span>
-                    <span><strong>{player.name}</strong><small>{player.profileType === 'linked' ? 'Linked player' : 'Managed player'}</small></span>
+                    <span><strong>{player.name}</strong><small>{isYou ? 'You' : 'Mate'}</small></span>
                     <span className="check-circle">{selected && <Check size={15} />}</span>
                   </button>
                 );
               })}
             </div>
-            <div className="builder-actions"><button className="secondary-button" onClick={onAddPlayers}><Plus size={18} /> New player</button><button className="primary-button" disabled={selectedIds.length !== 4 || busy} onClick={onContinue}>Open scoreboard <ChevronRight size={18} /></button></div>
+            <div className="builder-actions">
+              <button className="secondary-button" onClick={onInviteMates}><UserPlus size={18} /> Invite mates</button>
+              <button className="primary-button" disabled={!canOpen || busy} onClick={onContinue}>Open scoreboard <ChevronRight size={18} /></button>
+            </div>
           </>
         )}
       </section>
@@ -763,34 +919,119 @@ function GroupsView({
   );
 }
 
-function PlayersView({ players, user, name, onNameChange, onAdd, onLink, busy }: {
-  players: PlayerProfile[];
-  user: AppUser;
-  name: string;
-  onNameChange: (value: string) => void;
-  onAdd: () => void;
-  onLink: (id: string) => void;
+function MatesView({
+  mates,
+  invite,
+  onCreateInvite,
+  onCopyInvite,
+  onRemove,
+  busy,
+}: {
+  mates: Mate[];
+  invite: MateInviteLink | null;
+  onCreateInvite: () => void;
+  onCopyInvite: () => void;
+  onRemove: (id: string) => void;
   busy: boolean;
 }) {
-  const alreadyLinked = players.some((player) => player.linkedUserId === user.id);
   return (
     <main className="page-content narrow-page">
-      <section className="page-heading"><div><span className="eyebrow">Global players</span><h1>Player profiles</h1><p>Managed profiles can play and earn points without signing in.</p></div></section>
+      <section className="page-heading">
+        <div>
+          <span className="eyebrow">My padel mates</span>
+          <h1>People you can score with</h1>
+          <p>Share a single-use invite link. There is no directory to search.</p>
+        </div>
+      </section>
       <section className="add-player-band">
-        <label htmlFor="player-name">Player name</label>
-        <div><input id="player-name" value={name} onChange={(event) => onNameChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') onAdd(); }} placeholder="e.g. Maya Cohen" maxLength={40} /><button className="primary-button" onClick={onAdd} disabled={!name.trim() || busy}><Plus size={18} /> Add player</button></div>
+        <label htmlFor="invite-link">Invite link</label>
+        {invite ? (
+          <div>
+            <input id="invite-link" value={invite.url} readOnly />
+            <button className="primary-button" onClick={onCopyInvite}><Copy size={18} /> Copy</button>
+          </div>
+        ) : (
+          <div>
+            <button className="primary-button" onClick={onCreateInvite} disabled={busy}><Link2 size={18} /> Create invite link</button>
+          </div>
+        )}
+        {invite && <p className="invite-expiry">Expires {formatDate(invite.expiresAt)}. Creating another link leaves this one valid until it is used or expires.</p>}
       </section>
       <section className="player-directory">
-        <div className="section-title"><h2>All players</h2><span>{players.length}</span></div>
-        {players.length === 0 ? <div className="empty-line">No players yet.</div> : players.map((player, index) => (
-          <div className="directory-row" key={player.id}>
-            <span className={`avatar avatar-${index % 4 + 1}`}>{initials(player.name)}</span>
-            <div><strong>{player.name}</strong><small>{player.profileType === 'linked' ? 'Linked to an account' : 'Managed profile'}</small></div>
-            {player.linkedUserId === user.id ? <span className="linked-label"><UserRoundCheck size={15} /> You</span> : player.profileType === 'managed' && !alreadyLinked ? <button className="quiet-button" onClick={() => onLink(player.id)}>Link to me</button> : null}
+        <div className="section-title"><h2>Mates</h2><span>{mates.length}</span></div>
+        {mates.length === 0 ? (
+          <div className="empty-line">No mates yet. Share an invite link to add someone.</div>
+        ) : mates.map((mate, index) => (
+          <div className="directory-row" key={mate.id}>
+            <span className={`avatar avatar-${index % 4 + 1}`}>{initials(mate.name)}</span>
+            <div><strong>{mate.name}</strong><small>Can join your scoring groups</small></div>
+            <button className="quiet-button" onClick={() => onRemove(mate.id)} disabled={busy}><UserMinus size={15} /> Remove</button>
           </div>
         ))}
       </section>
     </main>
+  );
+}
+
+function LeaderboardHint() {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="leaderboard-hint" ref={rootRef}>
+      <button
+        type="button"
+        className={open ? 'leaderboard-hint-button open' : 'leaderboard-hint-button'}
+        aria-expanded={open}
+        aria-controls="leaderboard-hint-popover"
+        aria-label="How leaderboard scoring works"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Info size={16} />
+      </button>
+      {open && (
+        <div
+          id="leaderboard-hint-popover"
+          className="leaderboard-hint-popover"
+          role="dialog"
+          aria-labelledby="leaderboard-hint-title"
+        >
+          <h3 id="leaderboard-hint-title">How leaderboard scoring works</h3>
+          <p>Points are added only after a set is confirmed. Live scoring does not change this table.</p>
+          <p>Winning players receive 10 points plus the game difference. Losing players receive 0.</p>
+          <p>A set ended early still counts as a win, with half the 10-point bonus plus the same difference.</p>
+          <pre>
+            {`6-3 → 13 points each
+7-6 → 11 points each
+4-2 early → 7 points each`}
+          </pre>
+          <p>Guests never rank. A registered player whose partner is a guest still earns full points.</p>
+          <dl>
+            <div><dt>W-L</dt><dd>Sets won and lost</dd></div>
+            <div><dt>Diff</dt><dd>Game differential</dd></div>
+            <div><dt>Points</dt><dd>Running total</dd></div>
+          </dl>
+          <p>Rank is by points, then sets won, then differential, then games won, then name.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -806,22 +1047,35 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
     <main className="page-content">
       <section className="context-topline">
         <div><span className="eyebrow">Scoring context</span><h1>{groupName(data.players)}</h1><p>{data.players.map((player) => player.name).join(' · ')}</p></div>
-        <button className="primary-button" onClick={onNewActivity}><Plus size={19} /> New activity</button>
+        {data.canCreateActivity ? (
+          <button className="primary-button" onClick={onNewActivity}><Plus size={19} /> New activity</button>
+        ) : (
+          <p className="history-only-note">This group is history only. A former mate must be invited again before new scores can start.</p>
+        )}
       </section>
 
       <div className="dashboard-grid">
         <section className="leaderboard-panel">
-          <div className="panel-heading"><div><Trophy size={20} /><h2>Group leaderboard</h2></div><span>{data.leaderboard.reduce((sum, entry) => sum + entry.setsPlayed, 0) / 4 || 0} sets</span></div>
-          <div className="leaderboard-head"><span>#</span><span>Player</span><span>W-L</span><span>Diff</span><span>Points</span></div>
-          {data.leaderboard.map((entry, index) => (
-            <div className="leaderboard-row" key={entry.playerId}>
-              <span className={`rank rank-${index + 1}`}>{index + 1}</span>
-              <div><span className={`avatar avatar-${index % 4 + 1}`}>{initials(entry.playerName)}</span><span><strong>{entry.playerName}</strong><small>{entry.gamesWon}-{entry.gamesLost} games</small></span></div>
-              <span>{entry.setsWon}-{entry.setsLost}</span>
-              <span>{signed(entry.gameDifferential)}</span>
-              <strong>{entry.totalPoints}</strong>
+          <div className="panel-heading">
+            <div>
+              <Trophy size={20} />
+              <h2>Group leaderboard</h2>
+              <LeaderboardHint />
             </div>
-          ))}
+            <span>{data.leaderboard.length ? data.leaderboard.reduce((sum, entry) => sum + entry.setsPlayed, 0) / data.leaderboard.length : 0} sets</span>
+          </div>
+          <div className="leaderboard-table">
+            <div className="leaderboard-head"><span>#</span><span>Player</span><span>W-L</span><span>Diff</span><span>Points</span></div>
+            {data.leaderboard.map((entry, index) => (
+              <div className="leaderboard-row" key={entry.playerId}>
+                <span className={`rank rank-${index + 1}`}>{index + 1}</span>
+                <div><span className={`avatar avatar-${index % 4 + 1}`}>{initials(entry.playerName)}</span><span><strong>{entry.playerName}</strong><small>{entry.gamesWon}-{entry.gamesLost} games</small></span></div>
+                <span>{entry.setsWon}-{entry.setsLost}</span>
+                <span>{signed(entry.gameDifferential)}</span>
+                <strong>{entry.totalPoints}</strong>
+              </div>
+            ))}
+          </div>
         </section>
 
         <aside className="dashboard-side">
@@ -832,8 +1086,13 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
           {recoverableActivity && (
             <section className="resume-panel">
               <span className="live-dot"><span /> {recoverableActivity.status === 'active' ? 'Live activity' : 'Saved partial activity'}</span>
-              <h3>Activity #{recoverableActivity.activityNumber}</h3>
-              <button className="secondary-button" onClick={() => onOpenActivity(recoverableActivity.id)}>{recoverableActivity.status === 'active' ? 'Resume scoring' : 'Review result'} <ChevronRight size={17} /></button>
+              <h3>{activityTitle(recoverableActivity.activityNumber)}</h3>
+              <button className="secondary-button" onClick={() => onOpenActivity(recoverableActivity.id)}>
+                {recoverableActivity.status !== 'active'
+                  ? 'Review result'
+                  : recoverableActivity.viewerAccepted ? 'Resume scoring' : 'Join'}
+                {' '}<ChevronRight size={17} />
+              </button>
             </section>
           )}
         </aside>
@@ -866,7 +1125,7 @@ function ConfigurationView({ config, onChange, onBack, onStart, busy }: {
       <SettingGroup title="Deuce rule" icon={<Activity size={19} />} options={DEUCE_OPTIONS} value={config.deuceRule} onChange={(value) => onChange({ ...config, deuceRule: value })} />
       <SettingGroup title="Set length" icon={<Medal size={19} />} options={SET_OPTIONS} value={config.setWinRule} onChange={(value) => onChange({ ...config, setWinRule: value })} />
       <SettingGroup title="Tied set" icon={<RotateCcw size={19} />} options={TIEBREAK_OPTIONS} value={config.tieBreakRule} onChange={(value) => onChange({ ...config, tieBreakRule: value })} />
-      <section className="points-rule"><ShieldCheck size={20} /><div><strong>Player points</strong><p>Winning players receive 10 points plus the set score difference. Losing players receive 0.</p></div></section>
+      <section className="points-rule"><ShieldCheck size={20} /><div><strong>Player points</strong><p>Winning players receive 10 points plus the set score difference. Losing players receive 0. A set ended early still counts as a win, with half that bonus plus the same difference.</p></div></section>
       <div className="sticky-action"><button className="primary-button" onClick={onStart} disabled={busy}>Create activity <ChevronRight size={18} /></button></div>
     </main>
   );
@@ -895,22 +1154,34 @@ function SettingGroup<T extends string>({ title, icon, options, value, onChange 
   );
 }
 
-function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onFinish, busy }: {
+function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh, onFinish, busy }: {
   data: ActivityData;
   blueIds: string[];
   onBlueChange: (ids: string[]) => void;
   onStart: () => void;
   onShare: () => void;
+  onRefresh: () => void;
   onFinish: () => void;
   busy: boolean;
 }) {
-  const redPlayers = data.players.filter((player) => !blueIds.includes(player.id));
-  const bluePlayers = data.players.filter((player) => blueIds.includes(player.id));
+  const slots = matchSlotsFrom(data.players);
+  const redPlayers = slots.filter((player) => !blueIds.includes(player.id));
+  const bluePlayers = slots.filter((player) => blueIds.includes(player.id));
+  const registeredPlayers = data.players.filter((player) => !isGuestSlot(player.id));
+  const consentKnown = Array.isArray(data.acceptedPlayerIds);
+  const acceptedIds = new Set(data.acceptedPlayerIds ?? []);
+  const inCount = consentKnown
+    ? registeredPlayers.filter((player) => acceptedIds.has(player.id)).length
+    : 0;
+  const waitingForAccepts = !consentKnown || inCount < registeredPlayers.length;
   return (
     <main className="page-content setup-page">
       <section className="activity-heading">
-        <div><span className="live-dot"><span /> Activity #{data.activity.activityNumber}</span><h1>Set {data.activity.state.setNumber} teams</h1><p>Pick two players for Blue Team. The other two play for Red Team.</p></div>
-        <button className="icon-text-button" onClick={onShare}><Share2 size={18} /> Share</button>
+        <div><span className="live-dot"><span /> {activityTitle(data.activity.activityNumber)}</span><h1>Set {data.activity.state.setNumber} teams</h1><p>Pick two slots for Blue Team. The other two play for Red Team. Guests play but do not rank.</p></div>
+        <div className="heading-actions">
+          <button className="icon-text-button" onClick={onRefresh} disabled={busy}><RefreshCw size={18} /> Refresh</button>
+          <button className="icon-text-button" onClick={onShare}><Share2 size={18} /> Share</button>
+        </div>
       </section>
 
       <section className="team-builder">
@@ -919,10 +1190,33 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onFinish,
         <div className="team-preview red-preview"><span>Red Team</span><strong>{redPlayers.length === 2 ? redPlayers.map((player) => player.name).join(' & ') : 'Waiting'}</strong></div>
       </section>
 
+      <section className={waitingForAccepts ? 'consent-roster waiting' : 'consent-roster'}>
+        <div className="section-title">
+          <h2>{waitingForAccepts ? 'Who is in this activity' : 'Everyone is in'}</h2>
+          <span>{inCount}/{registeredPlayers.length} in</span>
+        </div>
+        {registeredPlayers.map((player, index) => {
+          const isIn = consentKnown && acceptedIds.has(player.id);
+          return (
+            <div className="directory-row" key={player.id}>
+              <span className={`avatar avatar-${index % 4 + 1}`}>{initials(player.name)}</span>
+              <div>
+                <strong>{player.name}</strong>
+                <small>{isIn ? 'Accepted this activity' : 'Has not opened the code or link yet'}</small>
+              </div>
+              <span className={isIn ? 'consent-status in' : 'consent-status pending'}>{isIn ? 'In' : 'Pending'}</span>
+            </div>
+          );
+        })}
+        {waitingForAccepts && (
+          <p>Share the code or link so they can accept. They do not need a free device slot.</p>
+        )}
+      </section>
+
       <section className="assign-panel">
         <div className="section-title"><h2>Blue Team players</h2><span>{blueIds.length}/2 selected</span></div>
         <div className="assign-grid">
-          {data.players.map((player, index) => {
+          {slots.map((player, index) => {
             const selected = blueIds.includes(player.id);
             return (
               <button key={player.id} className={selected ? 'selected' : ''} onClick={() => onBlueChange(toggleBlue(blueIds, player.id))} disabled={!selected && blueIds.length === 2}>
@@ -938,7 +1232,7 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onFinish,
         {data.logs.length === 0 ? <div className="empty-line">No completed sets yet.</div> : data.logs.map((log) => <SetLogRow key={log.id} log={log} players={data.players} />)}
       </section>
 
-      <div className="setup-actions"><button className="quiet-button" onClick={onFinish}>Finish activity</button><button className="primary-button" onClick={onStart} disabled={blueIds.length !== 2 || busy}>Start set {data.activity.state.setNumber} <ChevronRight size={18} /></button></div>
+      <div className="setup-actions"><button className="quiet-button" onClick={onFinish}>Finish activity</button><button className="primary-button" onClick={onStart} disabled={blueIds.length !== 2 || busy || waitingForAccepts}>Start set {data.activity.state.setNumber} <ChevronRight size={18} /></button></div>
     </main>
   );
 }
@@ -962,10 +1256,13 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
   const decisive = data.activity.config.deuceRule === 'golden-point' && state.blueScore === '40' && state.redScore === '40'
     ? 'Golden Point'
     : state.decisivePointActive ? 'Star Point' : null;
+  const gamesLead = state.blueGames === state.redGames
+    ? null
+    : state.blueGames > state.redGames ? 'blue' : 'red';
   return (
     <main className="scoreboard-page">
       <section className="score-statusbar">
-        <div><span>Activity #{data.activity.activityNumber}</span><strong>Set {state.setNumber}</strong></div>
+        <div><span>{activityTitle(data.activity.activityNumber)}</span><strong>Set {state.setNumber}</strong></div>
         <div className="status-items">
           <StatusIndicator status={status} />
           <span className="device-count"><Smartphone size={15} /> {data.devices.filter((device) => device.slotStatus !== 'released').length}/2</span>
@@ -976,24 +1273,38 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
       </section>
 
       <section className="score-court" aria-label="Live Padel scoreboard">
-        <button className="score-team blue-team" onClick={() => onPoint('blue')} disabled={scoringDisabled} aria-label={`Point to Blue Team, ${blueNames}`}>
+        <button className={gamesLead === 'blue' ? 'score-team blue-team leading' : 'score-team blue-team'} onClick={() => onPoint('blue')} disabled={scoringDisabled} aria-label={`Point to Blue Team, ${blueNames}`}>
           <span className="team-label"><span className="team-dot" /> Blue Team</span>
           <span className="team-names">{blueNames}</span>
           <span className="score-number">{state.blueScore}</span>
-          <span className="tap-label"><Plus size={17} /> Point</span>
+          <span className="score-actions">
+            <span className={gamesLead === 'blue' ? 'team-games leading' : 'team-games'}>
+              <span>Games</span><strong>{state.blueGames}</strong>
+            </span>
+            <span className="tap-label"><Plus size={17} /> Point</span>
+          </span>
         </button>
 
-        <div className="center-score">
+        <div className="center-score" aria-label={`Set games, Blue ${state.blueGames}, Red ${state.redGames}`}>
           <span className="games-label">Games</span>
-          <div><strong>{state.blueGames}</strong><span>:</span><strong>{state.redGames}</strong></div>
+          <div className="games-score">
+            <strong className={gamesLead === 'blue' ? 'games-count blue leading' : 'games-count blue'}>{state.blueGames}</strong>
+            <span className="games-sep">:</span>
+            <strong className={gamesLead === 'red' ? 'games-count red leading' : 'games-count red'}>{state.redGames}</strong>
+          </div>
           {decisive && <span className="decisive-label">{decisive}</span>}
         </div>
 
-        <button className="score-team red-team" onClick={() => onPoint('red')} disabled={scoringDisabled} aria-label={`Point to Red Team, ${redNames}`}>
+        <button className={gamesLead === 'red' ? 'score-team red-team leading' : 'score-team red-team'} onClick={() => onPoint('red')} disabled={scoringDisabled} aria-label={`Point to Red Team, ${redNames}`}>
           <span className="team-label"><span className="team-dot" /> Red Team</span>
           <span className="team-names">{redNames}</span>
           <span className="score-number">{state.redScore}</span>
-          <span className="tap-label"><Plus size={17} /> Point</span>
+          <span className="score-actions">
+            <span className={gamesLead === 'red' ? 'team-games leading' : 'team-games'}>
+              <span>Games</span><strong>{state.redGames}</strong>
+            </span>
+            <span className="tap-label"><Plus size={17} /> Point</span>
+          </span>
         </button>
       </section>
 
@@ -1081,7 +1392,7 @@ function HistoryModal({ data, onClose }: { data: ActivityData; onClose: () => vo
 function ShareModal({ data, onClose }: { data: ActivityData; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const link = typeof window === 'undefined' ? '' : `${window.location.origin}/?join=${data.activity.shareCode}`;
-  const message = `Join Padel Mate activity #${data.activity.activityNumber}. Session code: ${data.activity.shareCode}. ${link}`;
+  const message = `Join Padel Mate ${activityTitle(data.activity.activityNumber).toLowerCase()}. Session code: ${data.activity.shareCode}. ${link}`;
   const copy = async () => {
     await navigator.clipboard.writeText(message);
     setCopied(true);
@@ -1104,13 +1415,15 @@ function ShareModal({ data, onClose }: { data: ActivityData; onClose: () => void
   );
 }
 
-function SetLogRow({ log, players }: { log: SetLogEntry; players: PlayerProfile[] }) {
+function SetLogRow({ log, players }: { log: SetLogEntry; players: Player[] }) {
   return (
     <div className="set-log-row">
       <span className="set-number">S{log.setNumber}</span>
       <div><span className="blue-text">{namesFor(players, log.bluePlayerIds)}</span><small>vs</small><span className="red-text">{namesFor(players, log.redPlayerIds)}</span></div>
-      <strong>{log.blueGames}-{log.redGames}</strong>
-      <span className={`result-label ${log.conclusionType}`}>{conclusionLabel(log.conclusionType)}</span>
+      <div className="set-log-meta">
+        <strong>{log.blueGames}-{log.redGames}</strong>
+        <span className={`result-label ${log.conclusionType}`}>{conclusionLabel(log.conclusionType)}</span>
+      </div>
     </div>
   );
 }
@@ -1140,9 +1453,53 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return data;
 }
 
-function togglePlayer(current: string[], id: string) {
+function toggleRegistered(current: string[], id: string, selfId: string) {
+  if (id === selfId) return current.includes(selfId) ? current : [selfId, ...current];
   if (current.includes(id)) return current.filter((value) => value !== id);
-  return current.length < 4 ? [...current, id] : current;
+  return current.length < MATCH_SLOT_COUNT ? [...current, id] : current;
+}
+
+function slotIdsFor(registeredIds: string[]) {
+  const guests = Array.from(
+    { length: MATCH_SLOT_COUNT - registeredIds.length },
+    (_unused, index) => guestSlotId(index + 1),
+  );
+  return [...registeredIds, ...guests];
+}
+
+function activityTitle(number: number | null | undefined) {
+  return number == null ? 'Activity' : `Activity #${number}`;
+}
+
+function matchSlotsFrom(players: Player[]): Player[] {
+  const registered = [...players].sort((left, right) => left.id.localeCompare(right.id));
+  const guests = Array.from(
+    { length: MATCH_SLOT_COUNT - registered.length },
+    (_unused, index) => ({
+      id: guestSlotId(index + 1),
+      name: `Guest ${index + 1}`,
+      createdAt: '',
+    }),
+  );
+  return [...registered, ...guests];
+}
+
+function firstTwoSlotIds(players: Player[]) {
+  return matchSlotsFrom(players).slice(0, 2).map((player) => player.id);
+}
+
+function selectablePlayers(bootstrap: BootstrapData): Player[] {
+  const self: Player = {
+    id: bootstrap.user.id,
+    name: bootstrap.user.displayName,
+    createdAt: '',
+  };
+  return [self, ...bootstrap.mates];
+}
+
+function nameForContextMember(bootstrap: BootstrapData, playerId: string) {
+  if (playerId === bootstrap.user.id) return bootstrap.user.displayName;
+  return bootstrap.mates.find((mate) => mate.id === playerId)?.name ?? 'Player';
 }
 
 function toggleBlue(current: string[], id: string) {
@@ -1173,12 +1530,15 @@ function conclusionLabel(value: SetLogEntry['conclusionType']) {
   return 'Final';
 }
 
-function namesFor(players: PlayerProfile[], ids: string[]) {
-  return ids.map((id) => players.find((player) => player.id === id)?.name ?? 'Player').join(' & ');
+function namesFor(players: Player[], ids: string[]) {
+  return ids.map((id) => {
+    if (isGuestSlot(id)) return `Guest ${id.slice('guest:'.length)}`;
+    return players.find((player) => player.id === id)?.name ?? 'Player';
+  }).join(' & ');
 }
 
-function groupName(players: PlayerProfile[]) {
-  if (!players.length) return 'Four-player group';
+function groupName(players: Player[]) {
+  if (!players.length) return 'Scoring group';
   return players.map((player) => player.name.split(' ')[0]).join(' · ');
 }
 
@@ -1190,7 +1550,6 @@ function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, {
 function formatTime(value: string) { return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value)); }
 function displayName(value: string) { return value.includes('@') ? value.split('@')[0] : value; }
 function initials(value: string) { return displayName(value).split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'P'; }
-function nameSort(a: PlayerProfile, b: PlayerProfile) { return a.name.localeCompare(b.name); }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong.'; }
 function delay(ms: number) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
 
@@ -1204,4 +1563,14 @@ function forgetActivity(activityId: string) {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('padel-mate-last-activity-id');
   localStorage.removeItem(`padel-mate-recovery-${activityId}`);
+}
+
+function rememberContext(contextId: string) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(LAST_CONTEXT_KEY, contextId);
+}
+
+function forgetContext() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(LAST_CONTEXT_KEY);
 }

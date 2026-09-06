@@ -1,36 +1,39 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-export const userAccounts = sqliteTable('user_accounts', {
-  id: text('id').primaryKey(),
-  displayName: text('display_name').notNull(),
-  email: text('email').notNull(),
-  authProvider: text('auth_provider').notNull(),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-}, (table) => [uniqueIndex('idx_user_accounts_email').on(table.email)]);
+// better-auth owns these tables; they are generated, not hand-edited.
+export * from './auth-schema';
 
-export const authIdentities = sqliteTable('auth_identities', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull(),
-  provider: text('provider').notNull(),
-  providerUserId: text('provider_user_id').notNull(),
-  createdAt: text('created_at').notNull(),
-}, (table) => [
-  uniqueIndex('idx_auth_identities_provider_user').on(table.provider, table.providerUserId),
-  index('idx_auth_identities_user').on(table.userId),
-]);
-
+// `id` holds the better-auth `user.id`: a player and an account are the same
+// identity. Kept as its own table so match history survives account removal,
+// and so the generated auth schema never needs domain columns.
+// Names are intentionally not unique; two people may share one.
 export const playerProfiles = sqliteTable('player_profiles', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  normalizedName: text('normalized_name').notNull(),
-  createdByUserId: text('created_by_user_id').notNull(),
-  linkedUserId: text('linked_user_id'),
-  profileType: text('profile_type').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+// One row per direction, written as a pair, so listing a player's mates is a
+// single indexed lookup instead of an or-condition across two columns.
+export const mates = sqliteTable('mates', {
+  playerId: text('player_id').notNull(),
+  matePlayerId: text('mate_player_id').notNull(),
   createdAt: text('created_at').notNull(),
 }, (table) => [
-  uniqueIndex('idx_player_profiles_normalized_name').on(table.normalizedName),
-  index('idx_player_profiles_created_by').on(table.createdByUserId),
+  primaryKey({ columns: [table.playerId, table.matePlayerId] }),
+]);
+
+// The only route to becoming mates. Pending state lives here rather than on
+// `mates`, so an unaccepted invite never looks like a relationship.
+export const mateInvites = sqliteTable('mate_invites', {
+  token: text('token').primaryKey(),
+  createdByPlayerId: text('created_by_player_id').notNull(),
+  expiresAt: text('expires_at').notNull(),
+  consumedAt: text('consumed_at'),
+  consumedByPlayerId: text('consumed_by_player_id'),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  index('idx_mate_invites_creator').on(table.createdByPlayerId),
 ]);
 
 export const scoreboardContexts = sqliteTable('scoreboard_contexts', {
@@ -52,7 +55,7 @@ export const contextPlayers = sqliteTable('context_players', {
 export const activities = sqliteTable('activities', {
   id: text('id').primaryKey(),
   contextId: text('context_id').notNull(),
-  activityNumber: integer('activity_number').notNull(),
+  activityNumber: integer('activity_number'),
   status: text('status').notNull(),
   configJson: text('config_json').notNull(),
   shareCode: text('share_code').notNull(),
@@ -66,6 +69,7 @@ export const activities = sqliteTable('activities', {
   endedAt: text('ended_at'),
 }, (table) => [
   uniqueIndex('idx_activities_share_code').on(table.shareCode),
+  uniqueIndex('idx_activities_context_number').on(table.contextId, table.activityNumber),
   index('idx_activities_context_started').on(table.contextId, table.startedAt),
   index('idx_activities_status').on(table.status),
 ]);
@@ -86,6 +90,17 @@ export const activityDevices = sqliteTable('activity_devices', {
 }, (table) => [
   uniqueIndex('idx_activity_devices_device').on(table.activityId, table.deviceId),
   index('idx_activity_devices_slots').on(table.activityId, table.slotStatus),
+]);
+
+// Consent to be scored in this activity. Separate from activity_devices:
+// a player can accept without occupying one of the two live slots.
+export const activityConsents = sqliteTable('activity_consents', {
+  activityId: text('activity_id').notNull(),
+  playerId: text('player_id').notNull(),
+  acceptedAt: text('accepted_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.activityId, table.playerId] }),
+  index('idx_activity_consents_player').on(table.playerId),
 ]);
 
 export const sets = sqliteTable('sets', {

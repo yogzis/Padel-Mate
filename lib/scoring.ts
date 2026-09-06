@@ -102,8 +102,18 @@ export function isSetWinningScore(
   return null;
 }
 
-export function winningPlayerPoints(winningGames: number, losingGames: number) {
-  return 10 + Math.abs(winningGames - losingGames);
+const FINISHED_SET_WIN_BONUS = 10;
+const PARTIAL_SET_WIN_BONUS = 5;
+
+export function winningPlayerPoints(
+  winningGames: number,
+  losingGames: number,
+  conclusionType: 'normal' | 'manual-partial' = 'normal',
+) {
+  const winBonus = conclusionType === 'manual-partial'
+    ? PARTIAL_SET_WIN_BONUS
+    : FINISHED_SET_WIN_BONUS;
+  return winBonus + Math.abs(winningGames - losingGames);
 }
 
 export function scoreLabel(state: Pick<LiveActivityState, 'blueScore' | 'redScore'>) {

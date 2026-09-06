@@ -1,0 +1,49 @@
+name: Deploy to Cloudflare
+
+# No step interpolates untrusted input (github.event.*) into a run: command;
+# credentials are passed only through env: from repository secrets.
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+# A half-finished deploy is worse than a delayed one, so let an in-flight run
+# finish rather than cancelling it partway through migrations.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+      - run: npm test
+      - run: npx tsc --noEmit
+
+      - run: npm run build
+
+      # Migrations run before the deploy so the new code never meets an old schema.
+      - name: Apply D1 migrations
+        run: npm run db:migrate:remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy Worker
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

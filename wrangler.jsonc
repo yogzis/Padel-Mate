@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "padel-mate",
+
+  // Two independent floors apply here, and the later one wins:
+  //   2025-04-01 - nodejs_compat starts populating `process.env` from vars and
+  //                secrets, which is where better-auth reads its credentials.
+  //   2025-05-05 - WeakRef and FinalizationRegistry become available, which
+  //                React's RSC client requires to render at all.
+  "compatibility_date": "2025-05-05",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "main": "vinext/server/fetch-handler",
+  "assets": {
+    "directory": "dist/client",
+    "not_found_handling": "none",
+    "binding": "ASSETS"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "padel-mate",
+      // Replace with the id returned by `wrangler d1 create padel-mate`.
+      // Local dev ignores this value because Miniflare simulates D1 on disk.
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "drizzle"
+    }
+  ],
+
+  // Non-secret configuration. Locally these are overridden by .dev.vars;
+  // the values here are the ones that ship to production.
+  // Secrets (BETTER_AUTH_SECRET, GOOGLE_CLIENT_SECRET) must never live here —
+  // set them with `wrangler secret put`.
+  "vars": {
+    "ADMIN_EMAIL": "yogzis@gmail.com",
+    // TODO: replace with the deployed Worker origin before the first deploy.
+    // better-auth builds its Google callback URL from this, and the value must
+    // exactly match an Authorized redirect URI on the Google OAuth client.
+    "BETTER_AUTH_URL": "https://padel-mate.<your-subdomain>.workers.dev",
+    "GOOGLE_CLIENT_ID": "replace-with-production-google-client-id"
+  }
+}

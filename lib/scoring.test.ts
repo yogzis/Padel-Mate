@@ -92,3 +92,10 @@ test('winning points use the base plus game margin formula', () => {
   assert.equal(winningPlayerPoints(7, 5), 12);
   assert.equal(winningPlayerPoints(7, 6), 11);
 });
+
+test('manual partial sets use half the win bonus plus the same margin', () => {
+  assert.equal(winningPlayerPoints(4, 2, 'manual-partial'), 7);
+  assert.equal(winningPlayerPoints(5, 3, 'manual-partial'), 7);
+  assert.equal(winningPlayerPoints(5, 4, 'manual-partial'), 6);
+  assert.equal(winningPlayerPoints(5, 0, 'manual-partial'), 10);
+});

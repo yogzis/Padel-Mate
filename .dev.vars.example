@@ -1,0 +1,17 @@
+# Copy to `.dev.vars` and fill in. Loaded by wrangler for local Worker runs.
+# Production equivalents live in Cloudflare: secrets via `wrangler secret put`,
+# non-secret values in the `vars` block of wrangler.jsonc.
+
+# openssl rand -base64 32
+BETTER_AUTH_SECRET=""
+
+# Origin better-auth builds its OAuth callback URLs from. Must match the dev port.
+BETTER_AUTH_URL="http://localhost:3000"
+
+# Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID (Web).
+# Authorized redirect URI must be http://localhost:3000/api/auth/callback/google
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# Sole source of truth for who gets the admin role. There is no promote-in-UI path.
+ADMIN_EMAIL=""

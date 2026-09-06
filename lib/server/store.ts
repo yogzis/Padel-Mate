@@ -1,109 +1,48 @@
 import { env } from 'cloudflare:workers';
-import type { ChatGPTUser } from '../../app/chatgpt-auth';
+import type { AppUser } from '../../app/auth-session';
 import type {
   ActivityConfig,
   ContextSummary,
   GameSnapshot,
   LeaderboardEntry,
   LiveActivityState,
-  PlayerProfile,
+  Player,
   ScoreEvent,
   SetLogEntry,
   TeamId,
 } from '../domain';
 import { EMPTY_LIVE_STATE } from '../domain';
+import {
+  MATCH_SLOT_COUNT,
+  MIN_REGISTERED_PLAYERS_PER_CONTEXT,
+  contextKeyFor,
+  guestSlotId,
+  registeredPlayerIdsOf,
+} from '../player-identity';
 import { awardPoint, isSetWinningScore, snapshot, undoPoint, winningPlayerPoints } from '../scoring';
+import { StoreError } from './errors';
+import { listMates } from './mates';
+import { ensurePlayerRecord } from './players';
+
+export { StoreError };
 
 const ACTIVE_HEARTBEAT_MS = 30_000;
 const SLOT_RESERVATION_MS = 120_000;
 const ABANDONMENT_MS = 3 * 60 * 60 * 1000;
+const RETAINED_NUMBERED_ACTIVITIES = 5;
 
-const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS user_accounts (
-    id TEXT PRIMARY KEY, display_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
-    auth_provider TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS auth_identities (
-    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, provider TEXT NOT NULL,
-    provider_user_id TEXT NOT NULL, created_at TEXT NOT NULL,
-    UNIQUE (provider, provider_user_id)
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities(user_id)`,
-  `CREATE TABLE IF NOT EXISTS player_profiles (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized_name TEXT NOT NULL UNIQUE,
-    created_by_user_id TEXT NOT NULL, linked_user_id TEXT, profile_type TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_player_profiles_created_by ON player_profiles(created_by_user_id)`,
-  `CREATE TABLE IF NOT EXISTS scoreboard_contexts (
-    id TEXT PRIMARY KEY, context_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-    created_by_user_id TEXT NOT NULL, created_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS context_players (
-    context_id TEXT NOT NULL, player_id TEXT NOT NULL,
-    PRIMARY KEY (context_id, player_id)
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_context_players_player ON context_players(player_id)`,
-  `CREATE TABLE IF NOT EXISTS activities (
-    id TEXT PRIMARY KEY, context_id TEXT NOT NULL, activity_number INTEGER NOT NULL,
-    status TEXT NOT NULL, config_json TEXT NOT NULL, share_code TEXT NOT NULL UNIQUE,
-    state_json TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0,
-    created_by_user_id TEXT NOT NULL, started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-    all_devices_disconnected_at TEXT, abandoned_at TEXT, ended_at TEXT
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_activities_context_started ON activities(context_id, started_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_activities_status ON activities(status)`,
-  `CREATE TABLE IF NOT EXISTS activity_devices (
-    id TEXT PRIMARY KEY, activity_id TEXT NOT NULL, device_id TEXT NOT NULL,
-    user_id TEXT NOT NULL, user_display_name TEXT NOT NULL, device_label TEXT NOT NULL,
-    role TEXT NOT NULL, slot_status TEXT NOT NULL, reserved_until TEXT,
-    joined_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, left_at TEXT,
-    UNIQUE (activity_id, device_id)
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_activity_devices_slots ON activity_devices(activity_id, slot_status)`,
-  `CREATE TABLE IF NOT EXISTS sets (
-    id TEXT PRIMARY KEY, activity_id TEXT NOT NULL, set_number INTEGER NOT NULL,
-    blue_player_ids_json TEXT NOT NULL, red_player_ids_json TEXT NOT NULL,
-    blue_games INTEGER NOT NULL DEFAULT 0, red_games INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL, winner_team TEXT, conclusion_type TEXT,
-    started_at TEXT NOT NULL, completed_at TEXT
-  )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_sets_activity_number ON sets(activity_id, set_number)`,
-  `CREATE TABLE IF NOT EXISTS score_events (
-    id TEXT PRIMARY KEY, client_mutation_id TEXT NOT NULL UNIQUE, activity_id TEXT NOT NULL,
-    set_id TEXT NOT NULL, current_game_id TEXT NOT NULL, sequence_number INTEGER NOT NULL,
-    action TEXT NOT NULL, team TEXT, previous_snapshot_json TEXT NOT NULL,
-    next_snapshot_json TEXT NOT NULL, created_by_device_id TEXT NOT NULL,
-    created_by_user_id TEXT NOT NULL, user_display_name TEXT NOT NULL,
-    device_label TEXT NOT NULL, created_at TEXT NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_score_events_game_sequence ON score_events(current_game_id, sequence_number)`,
-  `CREATE TABLE IF NOT EXISTS set_logs (
-    id TEXT PRIMARY KEY, context_id TEXT NOT NULL, activity_id TEXT NOT NULL,
-    activity_number INTEGER NOT NULL, activity_date TEXT NOT NULL, set_id TEXT NOT NULL,
-    set_number INTEGER NOT NULL, blue_player_ids_json TEXT NOT NULL,
-    red_player_ids_json TEXT NOT NULL, blue_games INTEGER NOT NULL, red_games INTEGER NOT NULL,
-    winner_team TEXT, conclusion_type TEXT NOT NULL, created_at TEXT NOT NULL
-  )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_set_logs_set ON set_logs(set_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_set_logs_context_activity ON set_logs(context_id, activity_date)`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_entries (
-    context_id TEXT NOT NULL, player_id TEXT NOT NULL, total_points INTEGER NOT NULL DEFAULT 0,
-    sets_played INTEGER NOT NULL DEFAULT 0, sets_won INTEGER NOT NULL DEFAULT 0,
-    sets_lost INTEGER NOT NULL DEFAULT 0, games_won INTEGER NOT NULL DEFAULT 0,
-    games_lost INTEGER NOT NULL DEFAULT 0, game_differential INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (context_id, player_id)
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_leaderboard_context_points ON leaderboard_entries(context_id, total_points)`,
-  `PRAGMA optimize`,
-];
+function lastNumberedActivityIdsSql() {
+  return `SELECT id FROM activities
+    WHERE context_id = ? AND activity_number IS NOT NULL
+    ORDER BY started_at DESC
+    LIMIT ${RETAINED_NUMBERED_ACTIVITIES}`;
+}
 
-let schemaReady: Promise<void> | null = null;
 
 type ActivityRow = {
   id: string;
   context_id: string;
-  activity_number: number;
+  activity_number: number | null;
   status: 'active' | 'completed' | 'abandoned';
   config_json: string;
   share_code: string;
@@ -121,116 +60,91 @@ function db() {
   return env.DB;
 }
 
-export async function ensureSchema() {
-  if (!schemaReady) {
-    schemaReady = db().batch(SCHEMA.map((sql) => db().prepare(sql))).then(() => undefined);
-  }
-  await schemaReady;
-}
 
-export async function registerUser(user: ChatGPTUser) {
-  await ensureSchema();
-  const now = new Date().toISOString();
-  await db().batch([
-    db().prepare(
-      `INSERT INTO user_accounts (id, display_name, email, auth_provider, created_at, updated_at)
-       VALUES (?, ?, ?, 'chatgpt', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name,
-         email = excluded.email, updated_at = excluded.updated_at`,
-    ).bind(user.userId, user.displayName, user.email, now, now),
-    db().prepare(
-      `INSERT INTO auth_identities (id, user_id, provider, provider_user_id, created_at)
-       VALUES (?, ?, 'chatgpt', ?, ?)
-       ON CONFLICT(provider, provider_user_id) DO UPDATE SET user_id = excluded.user_id`,
-    ).bind(`chatgpt:${user.userId}`, user.userId, user.userId, now),
-  ]);
-}
+export async function getBootstrap(user: AppUser) {
+  // Repairs the row if the signup hook ever failed, so a signed-in user is
+  // never stranded without a player.
+  await ensurePlayerRecord(user.userId, user.displayName, user.email);
 
-export async function getBootstrap(user: ChatGPTUser) {
-  await registerUser(user);
-  const [playerResult, contextResult, contextPlayerResult] = await db().batch([
-    db().prepare(`SELECT id, name, profile_type, linked_user_id, created_at
-      FROM player_profiles ORDER BY name COLLATE NOCASE`),
-    db().prepare(`SELECT id, name, created_at FROM scoreboard_contexts ORDER BY created_at DESC`),
-    db().prepare(`SELECT context_id, player_id FROM context_players ORDER BY context_id, player_id`),
+  const [mates, contexts] = await Promise.all([
+    listMates(user.userId),
+    listContextsForPlayer(user.userId),
   ]);
 
-  const players = (playerResult.results as Record<string, unknown>[]).map(mapPlayer);
-  const memberships = contextPlayerResult.results as { context_id: string; player_id: string }[];
-  const contexts: ContextSummary[] = (contextResult.results as Record<string, unknown>[]).map((row) => ({
+  return {
+    user: {
+      id: user.userId,
+      displayName: user.displayName,
+      email: user.email,
+      isAdmin: user.isAdmin,
+    },
+    mates,
+    contexts,
+  };
+}
+
+/** Scoped to membership: a context belongs to the people in it, nobody else. */
+async function listContextsForPlayer(playerId: string): Promise<ContextSummary[]> {
+  const [contextResult, membershipResult] = await db().batch([
+    db().prepare(
+      `SELECT c.id, c.name, c.created_at FROM scoreboard_contexts c
+       JOIN context_players cp ON cp.context_id = c.id
+       WHERE cp.player_id = ? ORDER BY c.created_at DESC`,
+    ).bind(playerId),
+    db().prepare(
+      `SELECT context_id, player_id FROM context_players
+       WHERE context_id IN (SELECT context_id FROM context_players WHERE player_id = ?)
+       ORDER BY context_id, player_id`,
+    ).bind(playerId),
+  ]);
+
+  const memberships = membershipResult.results as { context_id: string; player_id: string }[];
+  return (contextResult.results as Record<string, unknown>[]).map((row) => ({
     id: String(row.id),
     name: String(row.name),
     createdAt: String(row.created_at),
     playerIds: memberships.filter((item) => item.context_id === row.id).map((item) => item.player_id),
   }));
-
-  return {
-    user: { id: user.userId, displayName: user.displayName, email: user.email },
-    players,
-    contexts,
-  };
 }
 
-export async function createPlayer(user: ChatGPTUser, nameValue: unknown) {
-  await registerUser(user);
-  const name = String(nameValue ?? '').trim().replace(/\s+/g, ' ');
-  if (!name) throw new StoreError(400, 'Enter a player name.');
-  if (name.length > 40) throw new StoreError(400, 'Player names can be up to 40 characters.');
-  const normalized = name.toLocaleLowerCase();
-  const duplicate = await db().prepare('SELECT id FROM player_profiles WHERE normalized_name = ?')
-    .bind(normalized).first<{ id: string }>();
-  if (duplicate) throw new StoreError(409, 'That player already exists.');
+/**
+ * Opens the context for a match line-up.
+ *
+ * Four slots are always filled, but only the registered ones identify the
+ * context, so swapping which guest turns up keeps the same leaderboard.
+ */
+export async function selectContext(user: AppUser, slotIdsValue: unknown) {
+  const slotIds = Array.isArray(slotIdsValue) ? slotIdsValue.map(String) : [];
+  if (slotIds.length !== MATCH_SLOT_COUNT) {
+    throw new StoreError(400, 'Fill all four match slots.');
+  }
 
-  const player: PlayerProfile = {
-    id: crypto.randomUUID(),
-    name,
-    profileType: 'managed',
-    linkedUserId: null,
-    createdAt: new Date().toISOString(),
-  };
-  await db().prepare(
-    `INSERT INTO player_profiles
-      (id, name, normalized_name, created_by_user_id, linked_user_id, profile_type, created_at)
-     VALUES (?, ?, ?, ?, NULL, 'managed', ?)`,
-  ).bind(player.id, player.name, normalized, user.userId, player.createdAt).run();
-  return player;
-}
-
-export async function linkPlayer(user: ChatGPTUser, playerId: unknown) {
-  await registerUser(user);
-  const id = String(playerId ?? '');
-  const linked = await db().prepare('SELECT id FROM player_profiles WHERE linked_user_id = ?')
-    .bind(user.userId).first<{ id: string }>();
-  if (linked && linked.id !== id) throw new StoreError(409, 'Your account is already linked to another player.');
-  const result = await db().prepare(
-    `UPDATE player_profiles SET linked_user_id = ?, profile_type = 'linked'
-     WHERE id = ? AND (linked_user_id IS NULL OR linked_user_id = ?)`,
-  ).bind(user.userId, id, user.userId).run();
-  if (!result.meta.changes) throw new StoreError(409, 'This player is already linked to someone else.');
-  return { ok: true };
-}
-
-export async function selectContext(user: ChatGPTUser, playerIdsValue: unknown) {
-  await registerUser(user);
-  const playerIds = Array.isArray(playerIdsValue)
-    ? [...new Set(playerIdsValue.map(String))].sort()
-    : [];
-  if (playerIds.length !== 4) throw new StoreError(400, 'Choose exactly four players.');
+  const playerIds = [...new Set(registeredPlayerIdsOf(slotIds))].sort();
+  if (playerIds.length < MIN_REGISTERED_PLAYERS_PER_CONTEXT) {
+    throw new StoreError(400, 'Choose at least two registered players.');
+  }
 
   const placeholders = playerIds.map(() => '?').join(',');
   const found = await db().prepare(`SELECT id, name FROM player_profiles WHERE id IN (${placeholders})`)
     .bind(...playerIds).all<{ id: string; name: string }>();
-  if (found.results.length !== 4) throw new StoreError(400, 'One or more selected players no longer exist.');
+  if (found.results.length !== playerIds.length) {
+    throw new StoreError(400, 'One or more selected players no longer exist.');
+  }
 
-  const key = playerIds.join(':');
+  await assertPlayersAreMates(user.userId, playerIds);
+
+  const key = contextKeyFor(slotIds);
   const existing = await db().prepare('SELECT id FROM scoreboard_contexts WHERE context_key = ?')
     .bind(key).first<{ id: string }>();
-  if (existing) return getContext(existing.id);
+  if (existing) return getContext(existing.id, user.userId);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const orderedNames = playerIds.map((playerId) => found.results.find((item) => item.id === playerId)?.name ?? 'Player');
-  const name = orderedNames.join(', ');
+  const guestCount = slotIds.length - playerIds.length;
+  const name = guestCount > 0
+    ? `${orderedNames.join(', ')} +${guestCount} guest${guestCount > 1 ? 's' : ''}`
+    : orderedNames.join(', ');
   await db().batch([
     db().prepare(
       `INSERT INTO scoreboard_contexts (id, context_key, name, created_by_user_id, created_at)
@@ -244,18 +158,124 @@ export async function selectContext(user: ChatGPTUser, playerIdsValue: unknown) 
        ON CONFLICT(context_id, player_id) DO NOTHING`,
     ).bind(id, playerId)),
   ]);
-  return getContext(id);
+  return getContext(id, user.userId);
 }
 
-export async function getContext(contextId: string) {
-  await ensureSchema();
+/**
+ * The creator must be playing, because contexts are only visible to their
+ * members: a line-up the creator is absent from would vanish on the next load.
+ */
+async function assertPlayersAreMates(userId: string, playerIds: readonly string[]) {
+  if (!playerIds.includes(userId)) {
+    throw new StoreError(400, 'You must be one of the players in the match.');
+  }
+
+  if (!(await playersAreStillMates(userId, playerIds))) {
+    throw new StoreError(403, 'You can only score matches with your mates.');
+  }
+}
+
+async function playersAreStillMates(userId: string, playerIds: readonly string[]): Promise<boolean> {
+  const otherPlayerIds = playerIds.filter((playerId) => playerId !== userId);
+  if (!otherPlayerIds.length) return true;
+
+  const placeholders = otherPlayerIds.map(() => '?').join(',');
+  const confirmed = await db().prepare(
+    `SELECT mate_player_id FROM mates
+     WHERE player_id = ? AND mate_player_id IN (${placeholders})`,
+  ).bind(userId, ...otherPlayerIds).all<{ mate_player_id: string }>();
+
+  return confirmed.results.length === otherPlayerIds.length;
+}
+
+async function registeredPlayerIdsFor(contextId: string): Promise<string[]> {
+  const rows = await db().prepare('SELECT player_id FROM context_players WHERE context_id = ?')
+    .bind(contextId).all<{ player_id: string }>();
+  return rows.results.map((row) => row.player_id).sort();
+}
+
+async function recordConsent(activityId: string, playerId: string) {
+  await db().prepare(
+    'INSERT OR IGNORE INTO activity_consents (activity_id, player_id, accepted_at) VALUES (?, ?, ?)',
+  ).bind(activityId, playerId, new Date().toISOString()).run();
+}
+
+async function assignActivityNumber(activity: ActivityRow): Promise<number> {
+  if (activity.activity_number != null) return activity.activity_number;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const latest = await db().prepare('SELECT activity_number FROM activities WHERE id = ?')
+      .bind(activity.id).first<{ activity_number: number | null }>();
+    if (latest?.activity_number != null) {
+      activity.activity_number = latest.activity_number;
+      return latest.activity_number;
+    }
+
+    const next = await db().prepare(
+      'SELECT COALESCE(MAX(activity_number), 0) + 1 AS next FROM activities WHERE context_id = ?',
+    ).bind(activity.context_id).first<{ next: number }>();
+    const number = Number(next?.next ?? 1);
+    try {
+      const claim = await db().prepare(
+        'UPDATE activities SET activity_number = ? WHERE id = ? AND activity_number IS NULL',
+      ).bind(number, activity.id).run();
+      if (claim.meta.changes) {
+        activity.activity_number = number;
+        return number;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  throw new StoreError(409, 'Could not number this activity. Try starting the set again.');
+}
+
+async function consentStatus(activityId: string, registeredIds: readonly string[]) {
+  const rows = await db().prepare('SELECT player_id FROM activity_consents WHERE activity_id = ?')
+    .bind(activityId).all<{ player_id: string }>();
+  const accepted = new Set(rows.results.map((row) => row.player_id));
+  return {
+    acceptedPlayerIds: registeredIds.filter((id) => accepted.has(id)),
+    pendingPlayerIds: registeredIds.filter((id) => !accepted.has(id)),
+  };
+}
+
+async function attachViewerAcceptance<T extends { id: string }>(
+  activities: T[],
+  viewerPlayerId?: string,
+): Promise<Array<T & { viewerAccepted: boolean }>> {
+  if (!viewerPlayerId || activities.length === 0) {
+    return activities.map((activity) => ({ ...activity, viewerAccepted: false }));
+  }
+
+  const placeholders = activities.map(() => '?').join(',');
+  const rows = await db().prepare(
+    `SELECT activity_id FROM activity_consents WHERE player_id = ? AND activity_id IN (${placeholders})`,
+  ).bind(viewerPlayerId, ...activities.map((activity) => activity.id)).all<{ activity_id: string }>();
+  const acceptedIds = new Set(rows.results.map((row) => row.activity_id));
+
+  return activities.map((activity) => ({
+    ...activity,
+    viewerAccepted: acceptedIds.has(activity.id),
+  }));
+}
+
+export async function getContext(contextId: string, viewerPlayerId?: string) {
   const context = await db().prepare('SELECT id, name, created_at FROM scoreboard_contexts WHERE id = ?')
     .bind(contextId).first<{ id: string; name: string; created_at: string }>();
   if (!context) throw new StoreError(404, 'Scoring group not found.');
 
+  if (viewerPlayerId) {
+    const member = await db().prepare(
+      'SELECT player_id FROM context_players WHERE context_id = ? AND player_id = ?',
+    ).bind(contextId, viewerPlayerId).first<{ player_id: string }>();
+    if (!member) throw new StoreError(403, 'This scoring group is not available.');
+  }
+
   const [playersResult, leaderboardResult, logsResult, activitiesResult] = await db().batch([
     db().prepare(
-      `SELECT p.id, p.name, p.profile_type, p.linked_user_id, p.created_at
+      `SELECT p.id, p.name, p.created_at
        FROM context_players cp JOIN player_profiles p ON p.id = cp.player_id
        WHERE cp.context_id = ? ORDER BY p.name COLLATE NOCASE`,
     ).bind(contextId),
@@ -272,9 +292,8 @@ export async function getContext(contextId: string) {
         blue_player_ids_json, red_player_ids_json, blue_games, red_games,
         winner_team, conclusion_type, created_at
        FROM set_logs WHERE context_id = ?
-       AND activity_id IN (
-         SELECT id FROM activities WHERE context_id = ? ORDER BY started_at DESC LIMIT 5
-       ) ORDER BY activity_date DESC, set_number DESC`,
+       AND activity_id IN (${lastNumberedActivityIdsSql()})
+       ORDER BY activity_date DESC, set_number DESC`,
     ).bind(contextId, contextId),
     db().prepare(
       `SELECT id, activity_number, status, started_at, updated_at, share_code
@@ -292,33 +311,39 @@ export async function getContext(contextId: string) {
     players: (playersResult.results as Record<string, unknown>[]).map(mapPlayer),
     leaderboard: (leaderboardResult.results as Record<string, unknown>[]).map(mapLeaderboard),
     logs: (logsResult.results as Record<string, unknown>[]).map(mapSetLog),
-    activities: (activitiesResult.results as Record<string, unknown>[]).map((row) => ({
-      id: String(row.id),
-      activityNumber: Number(row.activity_number),
-      status: String(row.status),
-      startedAt: String(row.started_at),
-      updatedAt: String(row.updated_at),
-      shareCode: String(row.share_code),
-    })),
+    activities: await attachViewerAcceptance(
+      (activitiesResult.results as Record<string, unknown>[]).map((row) => ({
+        id: String(row.id),
+        activityNumber: row.activity_number == null ? null : Number(row.activity_number),
+        status: String(row.status),
+        startedAt: String(row.started_at),
+        updatedAt: String(row.updated_at),
+        shareCode: String(row.share_code),
+      })),
+      viewerPlayerId,
+    ),
+    canCreateActivity: viewerPlayerId
+      ? await playersAreStillMates(
+        viewerPlayerId,
+        (playersResult.results as Record<string, unknown>[]).map((row) => String(row.id)),
+      )
+      : false,
   };
 }
 
 export async function createActivity(
-  user: ChatGPTUser,
+  user: AppUser,
   contextIdValue: unknown,
   configValue: unknown,
   deviceIdValue: unknown,
 ) {
-  await registerUser(user);
   const contextId = String(contextIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
   const config = validateConfig(configValue);
-  await getContext(contextId);
+  await getContext(contextId, user.userId);
+  const playerIds = await registeredPlayerIdsFor(contextId);
+  await assertPlayersAreMates(user.userId, playerIds);
 
-  const count = await db().prepare(
-    'SELECT COALESCE(MAX(activity_number), 0) AS count FROM activities WHERE context_id = ?',
-  ).bind(contextId).first<{ count: number }>();
-  const activityNumber = Number(count?.count ?? 0) + 1;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const shareCode = await makeShareCode();
@@ -328,33 +353,44 @@ export async function createActivity(
   await db().batch([
     db().prepare(
       `INSERT INTO activities
-        (id, context_id, activity_number, status, config_json, share_code, state_json,
+        (id, context_id, status, config_json, share_code, state_json,
          version, created_by_user_id, started_at, updated_at)
-       VALUES (?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?)`,
-    ).bind(id, contextId, activityNumber, JSON.stringify(config), shareCode, JSON.stringify(state), user.userId, now, now),
+       VALUES (?, ?, 'active', ?, ?, ?, 0, ?, ?, ?)`,
+    ).bind(id, contextId, JSON.stringify(config), shareCode, JSON.stringify(state), user.userId, now, now),
     db().prepare(
       `INSERT INTO activity_devices
         (id, activity_id, device_id, user_id, user_display_name, device_label, role,
          slot_status, reserved_until, joined_at, last_seen_at, left_at)
        VALUES (?, ?, ?, ?, ?, ?, 'host', 'active', NULL, ?, ?, NULL)`,
     ).bind(crypto.randomUUID(), id, deviceId, user.userId, user.displayName, label, now, now),
+    db().prepare(
+      'INSERT INTO activity_consents (activity_id, player_id, accepted_at) VALUES (?, ?, ?)',
+    ).bind(id, user.userId, now),
   ]);
-  return getActivity(id, deviceId, false);
+  return getActivity(id, deviceId, false, user.userId);
 }
 
 export async function joinActivity(
-  user: ChatGPTUser,
+  user: AppUser,
   activityRefValue: unknown,
   deviceIdValue: unknown,
 ) {
-  await registerUser(user);
   const ref = String(activityRefValue ?? '').trim();
   const deviceId = cleanDeviceId(deviceIdValue);
   const activity = await db().prepare(
     'SELECT * FROM activities WHERE id = ? OR UPPER(share_code) = UPPER(?)',
   ).bind(ref, ref).first<ActivityRow>();
   if (!activity) throw new StoreError(404, 'Activity session not found.');
-  if (activity.status === 'completed') throw new StoreError(409, 'This activity has already finished.');
+
+  const memberIds = await registeredPlayerIdsFor(activity.context_id);
+  if (!memberIds.includes(user.userId)) {
+    throw new StoreError(403, 'Only players in this scoring group can accept this activity.');
+  }
+  if (activity.status === 'completed') {
+    return getActivity(activity.id, deviceId, false, user.userId);
+  }
+
+  await recordConsent(activity.id, user.userId);
 
   await refreshDeviceSlots(activity.id);
   const existing = await db().prepare(
@@ -363,17 +399,17 @@ export async function joinActivity(
   const now = new Date().toISOString();
   if (existing) {
     if (existing.slot_status === 'released' && await countOccupiedSlots(activity.id) >= 2) {
-      throw new StoreError(409, 'This activity session is full. Only two devices can join.');
+      return getActivity(activity.id, deviceId, false, user.userId);
     }
     await db().prepare(
       `UPDATE activity_devices SET user_id = ?, user_display_name = ?, slot_status = 'active',
        reserved_until = NULL, last_seen_at = ?, left_at = NULL WHERE id = ?`,
     ).bind(user.userId, user.displayName, now, existing.id).run();
-    return getActivity(activity.id, deviceId, false);
+    return getActivity(activity.id, deviceId, false, user.userId);
   }
 
   const occupied = await countOccupiedSlots(activity.id);
-  if (occupied >= 2) throw new StoreError(409, 'This activity session is full. Only two devices can join.');
+  if (occupied >= 2) return getActivity(activity.id, deviceId, false, user.userId);
 
   const sameUser = await db().prepare(
     `SELECT COUNT(*) AS count FROM activity_devices
@@ -387,25 +423,39 @@ export async function joinActivity(
        slot_status, reserved_until, joined_at, last_seen_at, left_at)
      VALUES (?, ?, ?, ?, ?, ?, 'participant', 'active', NULL, ?, ?, NULL)`,
   ).bind(crypto.randomUUID(), activity.id, deviceId, user.userId, user.displayName, label, now, now).run();
-  return getActivity(activity.id, deviceId, false);
+  return getActivity(activity.id, deviceId, false, user.userId);
 }
 
-export async function getActivity(activityId: string, deviceIdValue: unknown, heartbeat = true) {
-  await ensureSchema();
+export async function getActivity(
+  activityId: string,
+  deviceIdValue: unknown,
+  heartbeat = true,
+  viewerUserId?: string,
+) {
   const deviceId = cleanDeviceId(deviceIdValue);
   await refreshDeviceSlots(activityId);
+
+  const activity = await db().prepare('SELECT * FROM activities WHERE id = ?')
+    .bind(activityId).first<ActivityRow>();
+  if (!activity) throw new StoreError(404, 'Activity session not found.');
+
+  const registeredIds = await registeredPlayerIdsFor(activity.context_id);
+  const consents = await consentStatus(activityId, registeredIds);
+
   if (heartbeat) {
     const result = await db().prepare(
       `UPDATE activity_devices SET slot_status = 'active', reserved_until = NULL,
        last_seen_at = ?, left_at = NULL WHERE activity_id = ? AND device_id = ?
        AND slot_status != 'released'`,
     ).bind(new Date().toISOString(), activityId, deviceId).run();
-    if (!result.meta.changes) throw new StoreError(403, 'This device is not connected to the activity.');
+    const acceptedWithoutDevice = Boolean(
+      viewerUserId && consents.acceptedPlayerIds.includes(viewerUserId),
+    );
+    if (!result.meta.changes && !acceptedWithoutDevice) {
+      throw new StoreError(403, 'This device is not connected to the activity.');
+    }
   }
 
-  const activity = await db().prepare('SELECT * FROM activities WHERE id = ?')
-    .bind(activityId).first<ActivityRow>();
-  if (!activity) throw new StoreError(404, 'Activity session not found.');
   await abandonIfExpired(activity);
   const refreshed = await db().prepare('SELECT * FROM activities WHERE id = ?')
     .bind(activityId).first<ActivityRow>();
@@ -438,7 +488,7 @@ export async function getActivity(activityId: string, deviceIdValue: unknown, he
     activity: {
       id: refreshed.id,
       contextId: refreshed.context_id,
-      activityNumber: refreshed.activity_number,
+      activityNumber: refreshed.activity_number == null ? null : Number(refreshed.activity_number),
       status: refreshed.status,
       config: parseJson<ActivityConfig>(refreshed.config_json, validateConfig({})),
       shareCode: refreshed.share_code,
@@ -460,11 +510,13 @@ export async function getActivity(activityId: string, deviceIdValue: unknown, he
     })),
     logs: logsResult.results.map(mapSetLog),
     history: historyResult.results.map(mapScoreEvent).reverse(),
+    acceptedPlayerIds: consents.acceptedPlayerIds,
+    pendingPlayerIds: consents.pendingPlayerIds,
   };
 }
 
 export async function setupSet(
-  user: ChatGPTUser,
+  user: AppUser,
   activityIdValue: unknown,
   deviceIdValue: unknown,
   blueIdsValue: unknown,
@@ -474,12 +526,18 @@ export async function setupSet(
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
   if (activity.status !== 'active') throw new StoreError(409, 'This activity is not active.');
+  const { pendingPlayerIds } = await consentStatus(
+    activityId,
+    await registeredPlayerIdsFor(activity.context_id),
+  );
+  if (pendingPlayerIds.length) {
+    throw new StoreError(409, 'Wait until every player in this group has accepted this activity.');
+  }
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
   if (state.phase !== 'set-setup') throw new StoreError(409, 'Finish the current set before changing teams.');
+  await assignActivityNumber(activity);
 
-  const contextPlayers = await db().prepare('SELECT player_id FROM context_players WHERE context_id = ?')
-    .bind(activity.context_id).all<{ player_id: string }>();
-  const allIds = contextPlayers.results.map((row) => row.player_id).sort();
+  const allIds = await matchSlotsFor(activity.context_id);
   const blueIds = Array.isArray(blueIdsValue) ? [...new Set(blueIdsValue.map(String))].sort() : [];
   if (blueIds.length !== 2 || !blueIds.every((id) => allIds.includes(id))) {
     throw new StoreError(400, 'Choose exactly two players for Blue Team.');
@@ -511,8 +569,26 @@ export async function setupSet(
   return getActivity(activityId, deviceId, false);
 }
 
+/**
+ * The four slots for a match, derived rather than stored: the context holds
+ * exactly the registered players of this line-up, so the remainder of the four
+ * are always guests.
+ */
+async function matchSlotsFor(contextId: string): Promise<string[]> {
+  const contextPlayers = await db().prepare('SELECT player_id FROM context_players WHERE context_id = ?')
+    .bind(contextId).all<{ player_id: string }>();
+
+  const registeredIds = contextPlayers.results.map((row) => row.player_id).sort();
+  const guestIds = Array.from(
+    { length: MATCH_SLOT_COUNT - registeredIds.length },
+    (_unused, index) => guestSlotId(index + 1),
+  );
+
+  return [...registeredIds, ...guestIds];
+}
+
 export async function scorePoint(
-  user: ChatGPTUser,
+  user: AppUser,
   activityIdValue: unknown,
   deviceIdValue: unknown,
   teamValue: unknown,
@@ -566,7 +642,7 @@ export async function scorePoint(
 }
 
 export async function undoScore(
-  user: ChatGPTUser,
+  user: AppUser,
   activityIdValue: unknown,
   deviceIdValue: unknown,
   mutationIdValue: unknown,
@@ -575,7 +651,7 @@ export async function undoScore(
 }
 
 export async function cancelGame(
-  user: ChatGPTUser,
+  user: AppUser,
   activityIdValue: unknown,
   deviceIdValue: unknown,
   mutationIdValue: unknown,
@@ -584,7 +660,7 @@ export async function cancelGame(
 }
 
 async function changeScoreState(
-  user: ChatGPTUser,
+  user: AppUser,
   activityIdValue: unknown,
   deviceIdValue: unknown,
   mutationIdValue: unknown,
@@ -764,12 +840,14 @@ async function completeSet(
      conclusion_type = ?, completed_at = ? WHERE id = ? AND status = 'active'`,
   ).bind(state.blueGames, state.redGames, winner, conclusionType, now, state.activeSetId).run();
   if (!claim.meta.changes) return;
-  const winnerIds = winner === 'blue' ? state.bluePlayerIds : state.redPlayerIds;
-  const loserIds = winner === 'blue' ? state.redPlayerIds : state.bluePlayerIds;
+  const activityNumber = await assignActivityNumber(activity);
+  // Guests play the set and stay in the log below, but never rank.
+  const winnerIds = registeredPlayerIdsOf(winner === 'blue' ? state.bluePlayerIds : state.redPlayerIds);
+  const loserIds = registeredPlayerIdsOf(winner === 'blue' ? state.redPlayerIds : state.bluePlayerIds);
   const winningGames = winner === 'blue' ? state.blueGames : state.redGames;
   const losingGames = winner === 'blue' ? state.redGames : state.blueGames;
   const margin = Math.abs(winningGames - losingGames);
-  const points = winningPlayerPoints(winningGames, losingGames);
+  const points = winningPlayerPoints(winningGames, losingGames, conclusionType);
   const next: LiveActivityState = {
     ...EMPTY_LIVE_STATE,
     phase: 'set-setup',
@@ -783,7 +861,7 @@ async function completeSet(
          conclusion_type, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      crypto.randomUUID(), activity.context_id, activity.id, activity.activity_number,
+      crypto.randomUUID(), activity.context_id, activity.id, activityNumber,
       activity.started_at, state.activeSetId, state.setNumber,
       JSON.stringify(state.bluePlayerIds), JSON.stringify(state.redPlayerIds),
       state.blueGames, state.redGames, winner, conclusionType, now,
@@ -832,6 +910,7 @@ async function disregardSet(activity: ActivityRow, state: LiveActivityState) {
      conclusion_type = 'disregarded', completed_at = ? WHERE id = ? AND status = 'active'`,
   ).bind(state.blueGames, state.redGames, now, state.activeSetId).run();
   if (!claim.meta.changes) return;
+  const activityNumber = await assignActivityNumber(activity);
   const next: LiveActivityState = {
     ...EMPTY_LIVE_STATE,
     phase: 'set-setup',
@@ -845,7 +924,7 @@ async function disregardSet(activity: ActivityRow, state: LiveActivityState) {
          conclusion_type, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'disregarded', ?)`,
     ).bind(
-      crypto.randomUUID(), activity.context_id, activity.id, activity.activity_number,
+      crypto.randomUUID(), activity.context_id, activity.id, activityNumber,
       activity.started_at, state.activeSetId, state.setNumber,
       JSON.stringify(state.bluePlayerIds), JSON.stringify(state.redPlayerIds),
       state.blueGames, state.redGames, now,
@@ -859,9 +938,7 @@ async function disregardSet(activity: ActivityRow, state: LiveActivityState) {
 
 async function purgeOldLogs(contextId: string) {
   await db().prepare(
-    `DELETE FROM set_logs WHERE context_id = ? AND activity_id NOT IN (
-      SELECT id FROM activities WHERE context_id = ? ORDER BY started_at DESC LIMIT 5
-    )`,
+    `DELETE FROM set_logs WHERE context_id = ? AND activity_id NOT IN (${lastNumberedActivityIdsSql()})`,
   ).bind(contextId, contextId).run();
 }
 
@@ -927,6 +1004,7 @@ async function abandonIfExpired(activity: ActivityRow) {
     ).bind(now, now, activity.id),
   ];
   if (state.activeSetId) {
+    const activityNumber = await assignActivityNumber(activity);
     statements.push(db().prepare(
       `INSERT OR IGNORE INTO set_logs
         (id, context_id, activity_id, activity_number, activity_date, set_id, set_number,
@@ -934,7 +1012,7 @@ async function abandonIfExpired(activity: ActivityRow) {
          conclusion_type, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'abandoned', ?)`,
     ).bind(
-      `abandoned-${activity.id}`, activity.context_id, activity.id, activity.activity_number,
+      `abandoned-${activity.id}`, activity.context_id, activity.id, activityNumber,
       activity.started_at, state.activeSetId, state.setNumber,
       JSON.stringify(state.bluePlayerIds), JSON.stringify(state.redPlayerIds),
       state.blueGames, state.redGames, now,
@@ -944,7 +1022,6 @@ async function abandonIfExpired(activity: ActivityRow) {
 }
 
 async function assertConnected(activityId: string, deviceId: string) {
-  await ensureSchema();
   const row = await db().prepare(
     `SELECT device_label, slot_status, reserved_until, last_seen_at FROM activity_devices
      WHERE activity_id = ? AND device_id = ?`,
@@ -975,7 +1052,6 @@ async function assertConnected(activityId: string, deviceId: string) {
 }
 
 async function getActivityRow(activityId: string) {
-  await ensureSchema();
   const row = await db().prepare('SELECT * FROM activities WHERE id = ?')
     .bind(activityId).first<ActivityRow>();
   if (!row) throw new StoreError(404, 'Activity session not found.');
@@ -996,12 +1072,10 @@ function validateConfig(value: unknown): ActivityConfig {
   };
 }
 
-function mapPlayer(row: Record<string, unknown>): PlayerProfile {
+function mapPlayer(row: Record<string, unknown>): Player {
   return {
     id: String(row.id),
     name: String(row.name),
-    profileType: row.profile_type === 'linked' ? 'linked' : 'managed',
-    linkedUserId: row.linked_user_id ? String(row.linked_user_id) : null,
     createdAt: String(row.created_at),
   };
 }
@@ -1088,8 +1162,3 @@ async function makeShareCode() {
   return crypto.randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase();
 }
 
-export class StoreError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}

@@ -1,0 +1,46 @@
+---
+description: Align planning with docs/ and update those docs when product or implementation decisions change
+alwaysApply: true
+---
+
+# Keep Project Knowledge Docs Current
+
+`docs/` is the source of truth for this app. Do not plan, advise, or implement from memory when these files already define the product or design.
+
+## Before planning or advising
+
+Read the relevant docs first. Advice, designs, and implementation plans must match what is already written, or explicitly propose a doc update when a change is needed.
+
+| Topic                                       | Read / update                                      |
+| ------------------------------------------- | -------------------------------------------------- |
+| Product goals, domain, UX, auth, sessions   | `docs/01-product-requirements.md`                  |
+| Architecture, tech, persistence, realtime   | `docs/02-development-design.md`                    |
+| Scoring, config, confirmations, leaderboard | `docs/03-scoring-and-configuration-spec.md`        |
+| Flows, state, sequence, structure           | `docs/04-project-diagrams.md`                      |
+| What is built vs remaining                  | `docs/05-implementation-requirements-checklist.md` |
+
+## After a decision or feature change
+
+When the user accepts a new decision, or when you add/change a feature, update the matching docs in the same turn. Do not leave code ahead of the docs.
+
+- Change a product rule → update `01` (and `05` if it is a requirement).
+- Change architecture or tech → update `02` (and diagrams in `04` if the flow or structure changed).
+- Change scoring or activity settings → update `03` (and `01` / `05` / `04` if behavior or flow changed).
+- Add a new requirement → add it to `01` and a checklist item in `05`.
+- Complete a checklist item → mark it done in `05`.
+
+Keep related docs consistent. If one file changes a rule, patch the others that still state the old rule.
+
+## Do not
+
+```text
+❌ Plan a feature that contradicts docs without calling out the conflict and updating docs after approval
+❌ Implement a new behavior and leave docs stale
+❌ Invent scoring, session, or auth rules that are not in docs without calling out the conflict and updating docs after approval
+```
+
+```text
+✅ Read the relevant docs before recommending a direction
+✅ If the decision changes the product, update docs in the same change with calling out the conflict and updating docs after approval
+✅ Keep 01, 02, 03, 04, and 05 aligned with each other
+```

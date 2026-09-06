@@ -32,12 +32,22 @@ export type LiveActivityState = GameSnapshot & {
   history: GameSnapshot[];
 };
 
-export type PlayerProfile = {
+/** Shares its id with the better-auth user account; they are one identity. */
+export type Player = {
   id: string;
   name: string;
-  profileType: 'managed' | 'linked';
-  linkedUserId: string | null;
   createdAt: string;
+};
+
+export type Mate = Player;
+
+/** A match slot holds either a registered player id or a `guest:N` id. */
+export type MatchSlotId = string;
+
+export type MateInviteLink = {
+  token: string;
+  url: string;
+  expiresAt: string;
 };
 
 export type ContextSummary = {
