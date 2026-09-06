@@ -167,7 +167,7 @@ flowchart LR
   C --> D[lint, test, tsc]
   D --> E[npm run build]
   E --> F[D1 migrations --remote]
-  F --> G[vinext-cloudflare deploy]
+  F --> G["wrangler deploy --config dist/server/wrangler.json"]
   G --> H[Cloudflare Worker + D1]
 ```
 
