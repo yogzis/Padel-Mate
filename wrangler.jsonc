@@ -14,7 +14,7 @@
   "assets": {
     "directory": "dist/client",
     "not_found_handling": "none",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
   },
 
   "d1_databases": [
@@ -23,9 +23,9 @@
       "database_name": "padel-mate",
       // Replace with the id returned by `wrangler d1 create padel-mate`.
       // Local dev ignores this value because Miniflare simulates D1 on disk.
-      "database_id": "00000000-0000-4000-8000-000000000000",
-      "migrations_dir": "drizzle"
-    }
+      "database_id": "022a8ff4-6340-4cc2-903b-cbe64a417da7",
+      "migrations_dir": "drizzle",
+    },
   ],
 
   // Non-secret configuration. Locally these are overridden by .dev.vars;
@@ -34,10 +34,7 @@
   // set them with `wrangler secret put`.
   "vars": {
     "ADMIN_EMAIL": "yogzis@gmail.com",
-    // TODO: replace with the deployed Worker origin before the first deploy.
-    // better-auth builds its Google callback URL from this, and the value must
-    // exactly match an Authorized redirect URI on the Google OAuth client.
-    "BETTER_AUTH_URL": "https://padel-mate.<your-subdomain>.workers.dev",
-    "GOOGLE_CLIENT_ID": "replace-with-production-google-client-id"
-  }
+    "BETTER_AUTH_URL": "https://padel-mate.yogzis.workers.dev",
+    "GOOGLE_CLIENT_ID": "60814393760-gut94be0a69slcc9q4ttqest2pt0il9m.apps.googleusercontent.com",
+  },
 }
