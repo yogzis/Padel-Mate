@@ -100,6 +100,7 @@
 - [x] Authorization guards are centralised and applied to every API route.
 - [x] Secrets are kept out of source control and out of `wrangler.jsonc`.
 - [x] Deploys are automated from the `production` branch and run migrations first.
+- [x] Pull requests into `development` and `production` run lint, tests, and tsc before merge.
 - [ ] Scoring engine is separated from UI.
 - [x] Context engine creates deterministic context keys.
 - [ ] Leaderboard calculation is separated from UI.

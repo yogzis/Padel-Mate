@@ -38,7 +38,7 @@ The implemented stack:
 - Authentication: [better-auth](https://better-auth.com) with the Google social provider and the `admin` plugin.
 - Styling: mobile-first responsive CSS with explicit portrait and landscape layouts, strong color contrast, and restrained animations.
 - Testing: unit tests for scoring, leaderboard, and admin-access functions, run with the Node test runner.
-- Deployment: GitHub Actions on push to the `production` branch.
+- Deployment: GitHub Actions. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys.
 
 Notes that constrain the implementation:
 
@@ -1183,6 +1183,8 @@ npm run db:reset                 # stop the dev server first
 A local production ship is `npm run deploy`, which runs `vinext build` and then `wrangler deploy --config dist/server/wrangler.json`. The Vite Cloudflare plugin emits the Worker entry and a resolved Wrangler config under `dist/server/`; the repo-root `wrangler.jsonc` is the source for bindings and production `vars`, not the file Wrangler uploads.
 
 `@vinext/cloudflare deploy` is not used. That CLI dropped `--config` and its setup check only recognizes a static `import { cloudflare }` from `@cloudflare/vite-plugin`. This repo loads that plugin dynamically in `vite.config.ts` so Wrangler log paths are set before the plugin snapshots them.
+
+Pull requests into `development` or `production` run `.github/workflows/ci.yml` (`CI / check`): lint, tests, and `tsc`. That workflow does not build, migrate, or deploy. Requiring the `CI / check` status on those branches is a GitHub ruleset setting, not something in this repo. Direct pushes skip that merge gate.
 
 Pushing to the `production` branch runs `.github/workflows/deploy.yml`, which lints, tests, type-checks, builds, applies D1 migrations with `npm run db:migrate:remote`, and then deploys with `npm run deploy`. Migrations run before the deploy so new code never meets an old schema.
 
