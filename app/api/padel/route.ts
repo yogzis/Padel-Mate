@@ -1,4 +1,12 @@
-import { getChatGPTUser } from '../../chatgpt-auth';
+import { requireActiveUser } from '../../auth-session';
+import {
+  acceptMateInvite,
+  createMateInvite,
+  peekMateInvite,
+  rejectMateInvite,
+  listMates,
+  removeMate,
+} from '../../../lib/server/mates';
 import {
   cancelGame,
   cancelSet,
@@ -6,14 +14,12 @@ import {
   confirmGame,
   confirmSet,
   createActivity,
-  createPlayer,
   finishActivity,
   getActivity,
   getBootstrap,
   getContext,
   joinActivity,
   leaveActivity,
-  linkPlayer,
   scorePoint,
   selectContext,
   setupSet,
@@ -25,19 +31,25 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const user = await requireUser();
+    const user = await requireActiveUser();
     const url = new URL(request.url);
     const action = url.searchParams.get('action') ?? 'bootstrap';
     let data: unknown;
 
     if (action === 'bootstrap') {
       data = await getBootstrap(user);
+    } else if (action === 'mates') {
+      data = await listMates(user.userId);
     } else if (action === 'context') {
-      data = await getContext(requiredParam(url, 'contextId'));
+      data = await getContext(requiredParam(url, 'contextId'), user.userId);
+    } else if (action === 'invite') {
+      data = await peekMateInvite(user.userId, requiredParam(url, 'token'));
     } else if (action === 'activity') {
       data = await getActivity(
         requiredParam(url, 'activityId'),
         requiredParam(url, 'deviceId'),
+        true,
+        user.userId,
       );
     } else {
       throw new StoreError(400, 'Unknown request.');
@@ -51,20 +63,26 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const user = await requireActiveUser();
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
     let data: unknown;
 
     switch (action) {
-      case 'create-player':
-        data = await createPlayer(user, body.name);
+      case 'create-invite':
+        data = await createMateInvite(user.userId);
         break;
-      case 'link-player':
-        data = await linkPlayer(user, body.playerId);
+      case 'accept-invite':
+        data = await acceptMateInvite(user.userId, body.token);
+        break;
+      case 'reject-invite':
+        data = await rejectMateInvite(user.userId, body.token);
+        break;
+      case 'remove-mate':
+        data = await removeMate(user.userId, body.matePlayerId);
         break;
       case 'select-context':
-        data = await selectContext(user, body.playerIds);
+        data = await selectContext(user, body.slotIds);
         break;
       case 'create-activity':
         data = await createActivity(user, body.contextId, body.config, body.deviceId);
@@ -116,12 +134,6 @@ export async function POST(request: Request) {
   } catch (error) {
     return errorResponse(error);
   }
-}
-
-async function requireUser() {
-  const user = await getChatGPTUser();
-  if (!user) throw new StoreError(401, 'Sign in to continue.');
-  return user;
 }
 
 function requiredParam(url: URL, name: string) {
