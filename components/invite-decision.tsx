@@ -1,7 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
+import { GoHomeButton } from './go-home-button';
 
 export function InviteDecision({ token, inviterName }: { token: string; inviterName: string }) {
   const [outcome, setOutcome] = useState<'pending' | 'accepted' | 'rejected'>('pending');
@@ -32,7 +32,7 @@ export function InviteDecision({ token, inviterName }: { token: string; inviterN
       <>
         <h1>You are now mates</h1>
         <p>You and {inviterName} can now score matches together.</p>
-        <Link className="primary-button" href="/">Go to Padel Mate</Link>
+        <GoHomeButton href="/?screen=mates">Go to your mates</GoHomeButton>
       </>
     );
   }
@@ -42,7 +42,7 @@ export function InviteDecision({ token, inviterName }: { token: string; inviterN
       <>
         <h1>Invite declined</h1>
         <p>You did not become mates with {inviterName}. This link cannot be used again.</p>
-        <Link className="primary-button" href="/">Go to Padel Mate</Link>
+        <GoHomeButton />
       </>
     );
   }

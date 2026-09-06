@@ -44,9 +44,12 @@ export type Mate = Player;
 /** A match slot holds either a registered player id or a `guest:N` id. */
 export type MatchSlotId = string;
 
+export const MATE_INVITE_LIFETIME_MS = 30 * 60 * 1000;
+
 export type MateInviteLink = {
   token: string;
   url: string;
+  createdAt: string;
   expiresAt: string;
 };
 

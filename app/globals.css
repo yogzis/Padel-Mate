@@ -83,7 +83,8 @@ label:has(input:focus-visible) {
 .eyebrow { color: #69766e; font-size: 11px; font-weight: 850; text-transform: uppercase; }
 .section-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .section-title h2 { margin: 0; font-size: 17px; font-weight: 820; }
-.section-title > span { color: #758078; font-size: 12px; font-weight: 700; }
+.section-title > span, .section-title-actions > span { color: #758078; font-size: 12px; font-weight: 700; }
+.section-title-actions { display: flex; align-items: center; gap: 12px; }
 
 .primary-button, .secondary-button, .quiet-button, .danger-button, .icon-text-button, .whatsapp-button {
   display: inline-flex;
@@ -143,6 +144,9 @@ label:has(input:focus-visible) {
 
 .add-player-band { margin-bottom: 26px; }
 .add-player-band > div { max-width: 590px; }
+.add-player-band > .invite-actions { display: flex; width: 100%; max-width: none; align-items: center; gap: 8px; }
+.invite-actions-main { display: flex; flex: 1; min-width: 0; gap: 8px; }
+.invite-delete { width: 44px; margin-left: auto; padding: 0; color: #9c2638; }
 .player-directory { background: white; border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
 .directory-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 62px; border-bottom: 1px solid var(--soft-line); }
 .directory-row:last-child { border-bottom: 0; }
@@ -334,6 +338,7 @@ label:has(input:focus-visible) {
 .share-code span, .share-code strong { display: block; }
 .share-code span { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .share-code strong { margin-top: 3px; font-family: var(--font-geist-mono); font-size: 28px; letter-spacing: 4px; }
+.share-code-link strong { font-size: 13px; letter-spacing: 0; line-height: 1.4; word-break: break-all; }
 .share-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .device-slots { display: grid; gap: 7px; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--soft-line); text-align: left; }
 .device-slots > div { display: flex; align-items: center; gap: 9px; }
@@ -372,7 +377,10 @@ label:has(input:focus-visible) {
   .builder-actions, .setup-actions { align-items: stretch; flex-direction: column-reverse; }
   .builder-actions > *, .setup-actions > *, .sticky-action .primary-button { width: 100%; }
   .add-player-band > div { flex-direction: column; }
-  .add-player-band .primary-button { width: 100%; }
+  .add-player-band .invite-actions { flex-direction: row; align-items: center; }
+  .add-player-band .invite-actions-main { flex-direction: column; }
+  .add-player-band .primary-button, .add-player-band .secondary-button { width: 100%; }
+  .add-player-band .invite-delete { width: 44px; margin-left: auto; align-self: center; }
   .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
   .leaderboard-head, .leaderboard-row { grid-template-columns: 22px minmax(0, 1fr) 40px 36px 44px; gap: 4px; padding-left: 10px; padding-right: 10px; }
   .leaderboard-row > strong { font-size: 16px; }
