@@ -101,6 +101,7 @@
 - [x] Secrets are kept out of source control and out of `wrangler.jsonc`.
 - [x] Deploys are automated from the `production` branch and run migrations first.
 - [x] Pull requests into `development` and `production` run lint, tests, and tsc before merge.
+- [x] Branch promotion is one-way: feature PRs target `main`, then `main` → `development` → `production`, each hop gated by `CI / check`.
 - [ ] Scoring engine is separated from UI.
 - [x] Context engine creates deterministic context keys.
 - [ ] Leaderboard calculation is separated from UI.
