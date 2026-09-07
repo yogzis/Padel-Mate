@@ -36,9 +36,29 @@ The implemented stack:
 - Database: Cloudflare D1 (serverless SQLite), bound as `DB` in `wrangler.jsonc`.
 - Schema and migrations: Drizzle ORM with drizzle-kit. Migrations in `drizzle/` are the single source of truth; the schema is never created at runtime.
 - Authentication: [better-auth](https://better-auth.com) with the Google social provider and the `admin` plugin.
-- Styling: mobile-first responsive CSS with explicit portrait and landscape layouts, strong color contrast, and restrained animations.
+- Styling: mobile-first responsive CSS with explicit portrait and landscape layouts, strong color contrast, and restrained animations. Chrome colors come from the logo branding tokens in `app/globals.css`.
 - Testing: unit tests for scoring, leaderboard, and admin-access functions, run with the Node test runner.
 - Deployment: GitHub Actions. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys.
+
+### Branding
+
+Logo colors sampled from `public/padel-mate-logo.png`. Chrome uses these tokens. The live scoreboard does not.
+
+| Token | Hex | Role |
+| --- | --- | --- |
+| `--brand` | `#085088` | Wordmark and racket body. Primary chrome accent. |
+| `--brand-dark` | `#064070` | Racket outline / pressed states. |
+| `--brand-mid` | `#2088c8` | Gloss highlight. Live dots, selected rings, icon accents, focus outline. |
+| `--brand-soft` | `#e8f3fb` | Selected and complete fills. |
+| `--brand-ink` | `#0a2a44` | Body text on chrome. Also `--ink`. |
+| `--brand-white` | `#ffffff` | Surfaces and focus inner edge. |
+| `--muted` | `#5c6770` | Secondary chrome text. |
+| `--control-line` | `#7d868f` | Input and control borders (3:1 on white and canvas). |
+| `--blue` | `#156fe5` | Blue Team fill. |
+| `--red` | `#c43346` | Red Team fill. White score text meets 4.5:1. |
+| `--score-accent` | `#d7ff45` | Lime badges on the live scoreboard only. |
+
+Focus rings use a white inner edge plus `--brand-mid` so they stay visible on light chrome, ink buttons, Blue/Red team panels, and the olive scoreboard. Disabled chrome buttons use a muted fill instead of a global fade. Danger and WhatsApp colors stay semantic, not brand chrome.
 
 Notes that constrain the implementation:
 
@@ -62,6 +82,8 @@ Responsible for:
 - Calling domain actions.
 - Showing validation errors.
 - Showing Groups and Mates in the header menu on phones, where the header tabs are hidden.
+- Rendering the signed-in header brand as the wordmark image at `/padel-mate-logo.png`. The button keeps the accessible name Padel Mate home.
+- Rendering the same wordmark on the sign-in card. The heading stays available to assistive tech.
 
 The UI layer should not contain scoring rule complexity.
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { LogIn, ShieldOff } from 'lucide-react';
+import { ShieldOff } from 'lucide-react';
 import { useState } from 'react';
 import { authClient } from '../lib/auth-client';
 
@@ -40,10 +40,17 @@ export default function SignInScreen({
   return (
     <main className="sign-in-page">
       <div className="sign-in-card">
-        <span className="brand-mark">
-          {isSuspended ? <ShieldOff size={18} /> : <LogIn size={18} />}
-        </span>
-        <h1>{isSuspended ? 'Account suspended' : 'Padel Mate'}</h1>
+        {isSuspended ? (
+          <>
+            <span className="brand-mark"><ShieldOff size={18} /></span>
+            <h1>Account suspended</h1>
+          </>
+        ) : (
+          <>
+            <img className="sign-in-logo" src="/padel-mate-logo.png" alt="" />
+            <h1 className="visually-hidden">Padel Mate</h1>
+          </>
+        )}
         <p>
           {isSuspended
             ? 'Your account is currently suspended. Contact the administrator if you think this is a mistake.'
