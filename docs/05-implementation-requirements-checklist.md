@@ -268,6 +268,9 @@
 - [ ] Player names are visible under each team.
 - [ ] Buttons are large enough for touch.
 - [x] On phones, Groups and Mates are available from the header menu.
+- [x] The signed-in header shows the Padel Mate wordmark logo.
+- [x] App chrome uses the logo navy and royal blue tokens. The live scoreboard stays dark olive with Blue and Red teams.
+- [x] Chrome focus rings, control borders, and Red Team score text meet WCAG 2.2 AA contrast.
 - [ ] Confirmation dialogs clearly state the consequence.
 - [ ] The activity configuration screen explains each option.
 - [ ] The app prevents starting a set with invalid teams.
