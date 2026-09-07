@@ -163,16 +163,20 @@ flowchart TD
 
 ## 1.0.2 Deployment Flow
 
-Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub ruleset setting. Push to `production` still deploys.
+Promotion is one-way: feature → `main` → `development` → `production`. Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub ruleset setting. Push to `production` still deploys. Do not merge `production` or `development` back into `main`.
 
 ```mermaid
 flowchart TD
-  A[PR into development or production] --> B[CI check]
-  B --> C[lint, test, tsc]
-  C -->|fail| D[Merge blocked if required]
-  C -->|pass| E[Merge]
-  E --> F[Push to production]
-  F --> G[Deploy workflow]
+  F[Feature PR into main] --> M[main]
+  M --> P1[PR main into development]
+  P1 --> C1[CI check]
+  C1 -->|fail| D1[Merge blocked if required]
+  C1 -->|pass| Dev[development]
+  Dev --> P2[PR development into production]
+  P2 --> C2[CI check]
+  C2 -->|fail| D2[Merge blocked if required]
+  C2 -->|pass| Prod[production]
+  Prod --> G[Deploy workflow]
   G --> H[lint, test, tsc, build]
   H --> I[D1 migrations --remote]
   I --> J["wrangler deploy --config dist/server/wrangler.json"]
