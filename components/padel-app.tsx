@@ -875,8 +875,7 @@ function AppHeader({
     <header className="app-header">
       <div className="header-inner">
         <button className="brand" onClick={() => onNavigate('groups')} aria-label="Padel Mate home">
-          <span className="brand-mark"><Activity size={20} strokeWidth={2.5} /></span>
-          <span>Padel Mate</span>
+          <img className="brand-logo" src="/padel-mate-logo.png" alt="" width={160} height={52} />
         </button>
 
         <nav className="desktop-nav" aria-label="Main navigation">
