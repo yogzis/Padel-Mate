@@ -597,6 +597,8 @@ Acceptance criteria:
 ### Usability
 
 - Mobile phone usage is the primary experience.
+- The signed-in header and the sign-in card show the Padel Mate wordmark logo in place of a separate icon and title.
+- App chrome (header, sign-in, buttons, selections, live pills) uses the logo navy and royal blues. The live scoreboard stays dark olive, with Blue Team and Red Team as the only strong team colors.
 - On phones, Groups and Mates are available from the header menu because the header tabs are hidden.
 - Main scoring buttons must be large enough for quick use during play.
 - The live scoreboard must be readable outdoors and from a distance.
@@ -635,7 +637,7 @@ Acceptance criteria:
 
 - Buttons must have accessible labels.
 - Color must not be the only indicator of team identity.
-- Text contrast must be high.
+- Text contrast must meet WCAG 2.2 AA. Interactive control borders and focus rings must stay visible on light chrome, ink buttons, and the live scoreboard.
 - Dialogs must support keyboard interaction.
 
 ### Performance
