@@ -49,6 +49,7 @@ import {
   guestSlotId,
   isGuestSlot,
 } from '../lib/player-identity';
+import { activityIsPaused, shouldShowLiveScoreboard } from '../lib/activity-roles';
 import {
   filterGroupList,
   groupListPrefsKey,
@@ -80,6 +81,8 @@ type ContextData = {
     startedAt: string;
     updatedAt: string;
     shareCode: string;
+    ownerUserId: string;
+    ownerName: string;
     viewerAccepted: boolean;
   }>;
   canCreateActivity: boolean;
@@ -112,8 +115,31 @@ type ActivityData = {
   history: ScoreEvent[];
   acceptedPlayerIds: string[];
   pendingPlayerIds: string[];
+  ownerUserId: string;
+  ownerName: string;
+  controllerUserIds: string[];
+  viewerIsOwner: boolean;
+  viewerIsController: boolean;
 };
 type Screen = 'groups' | 'mates' | 'context' | 'configure' | 'set-setup' | 'scoreboard';
+function activityScreen(data: ActivityData): Screen {
+  return shouldShowLiveScoreboard({
+    phase: data.activity.state.phase,
+    viewerIsController: data.viewerIsController,
+    viewerIsOwner: data.viewerIsOwner,
+    completedSetCount: data.logs.length,
+    setNumber: data.activity.state.setNumber,
+  }) ? 'scoreboard' : 'set-setup';
+}
+
+function pendingPlayerNames(data: ActivityData) {
+  const names = data.pendingPlayerIds.map((id) => (
+    data.players.find((player) => player.id === id)?.name ?? copy.chrome.playerFallback
+  ));
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
 type SaveStatus = 'saved' | 'saving' | 'retry' | 'offline';
 
 function landingScreen(): Screen {
@@ -295,8 +321,14 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         activityId: activeActivityId,
         deviceId,
       });
-      if (fresh.activity.status === 'completed') {
-        await returnToContext(fresh.activity.contextId, fresh.activity.id);
+      if (fresh.activity.status === 'completed' || fresh.activity.status === 'abandoned') {
+        await returnToContext(
+          fresh.activity.contextId,
+          fresh.activity.id,
+          fresh.activity.status === 'abandoned'
+            ? copy.errors.notices.ownerClosedActivity
+            : copy.errors.notices.activityFinished,
+        );
         return fresh;
       }
       rememberActivity(fresh);
@@ -305,11 +337,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         return fresh;
       });
       setSaveStatus('saved');
-      if (fresh.activity.status === 'active' && fresh.activity.state.phase === 'live') {
-        setScreen('scoreboard');
-      } else if (fresh.activity.status === 'active' && fresh.activity.state.phase === 'set-setup') {
-        setScreen((current) => (current === 'scoreboard' ? 'set-setup' : current));
-      }
+      if (fresh.activity.status === 'active') setScreen(activityScreen(fresh));
       return fresh;
     } catch {
       setSaveStatus('offline');
@@ -460,10 +488,14 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       setBluePlayerIds(data.activity.state.bluePlayerIds.length === 2
         ? data.activity.state.bluePlayerIds
         : firstTwoSlotIds(data.players));
-      setScreen(data.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup');
       if (data.activity.status === 'abandoned' && data.activity.state.phase === 'live') {
-        setModal('manual');
-        setNotice(copy.errors.notices.reviewPartial);
+        setScreen('scoreboard');
+        if (data.viewerIsOwner) {
+          setModal('manual');
+          setNotice(copy.errors.notices.reviewPartial);
+        }
+      } else {
+        setScreen(activityScreen(data));
       }
       setJoinCode('');
       return data;
@@ -515,7 +547,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
               }
               setActivityData(restored);
               setSaveStatus('offline');
-              setScreen(restored.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup');
+              setScreen(activityScreen(restored));
               return;
             } catch {
               localStorage.removeItem(`padel-mate-recovery-${savedActivityId}`);
@@ -532,6 +564,10 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const startSet = async () => {
     if (!activityData || bluePlayerIds.length !== 2) return;
     await activityAction('setup-set', { bluePlayerIds }, 'scoreboard');
+  };
+
+  const assignControllers = async (controllerUserIds: string[]) => {
+    await activityAction('assign-controllers', { controllerUserIds });
   };
 
   const activityAction = async (
@@ -566,6 +602,8 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
 
   const addPoint = async (team: TeamId) => {
     if (!activityData || busy || saveStatus === 'offline') return;
+    if (!activityData.viewerIsController || activityIsPaused(activityData.pendingPlayerIds)) return;
+    if (activityData.activity.state.phase !== 'live') return;
     const mutationId = crypto.randomUUID();
     const current = activityData;
     try {
@@ -633,16 +671,24 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
 
   const leaveActivity = async () => {
     if (!activityData) return;
+    const contextId = activityData.activity.contextId;
+    const activityId = activityData.activity.id;
     try {
-      await apiPost({ action: 'leave-activity', activityId: activityData.activity.id, deviceId });
+      const result = await apiPost<{ ok: true; closed: boolean; contextId: string }>({
+        action: 'leave-activity',
+        activityId,
+        deviceId,
+      });
+      await returnToContext(
+        result.contextId || contextId,
+        activityId,
+        result.closed ? copy.errors.notices.youClosedActivity : copy.errors.notices.leftActivity,
+      );
+    } catch (caught) {
+      setError(messageOf(caught));
+      await returnToContext(contextId, activityId, copy.errors.notices.leftActivity);
     } finally {
-      forgetActivity(activityData.activity.id);
-      forgetContext();
-      setActivityData(null);
-      setContextData(null);
       setMenuOpen(false);
-      await loadBootstrap().catch(() => undefined);
-      setScreen('groups');
     }
   };
 
@@ -711,6 +757,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
           onBlueChange={setBluePlayerIds}
           onStart={startSet}
           onShare={() => setModal('share')}
+          onAssignControllers={assignControllers}
           onRefresh={async () => {
             setBusy(true);
             setError('');
@@ -778,7 +825,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       {notice && <div className="toast" role="status"><CheckCircle2 size={17} />{notice}</div>}
       {main}
 
-      {activityData?.activity.state.pendingGameWinner && (
+      {activityData?.activity.state.pendingGameWinner && activityData.viewerIsOwner && (
         <ConfirmDialog
           title={copy.live.gameWon(teamName(activityData.activity.state.pendingGameWinner))}
           description={copy.live.updateSetScorePrompt}
@@ -789,7 +836,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         />
       )}
 
-      {activityData?.activity.state.pendingSetWinner && (
+      {activityData?.activity.state.pendingSetWinner && activityData.viewerIsOwner && (
         <ConfirmDialog
           title={copy.live.setWon(teamName(activityData.activity.state.pendingSetWinner))}
           description={copy.live.setWonDescription(activityData.activity.state.blueGames, activityData.activity.state.redGames)}
@@ -798,7 +845,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
             const result = await activityAction('confirm-set');
             if (result) {
               setBluePlayerIds(firstTwoSlotIds(result.players));
-              setScreen('set-setup');
+              setScreen(activityScreen(result));
             }
           }}
           onCancel={() => activityAction('cancel-set')}
@@ -848,7 +895,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
           busy={busy}
         />
       )}
-      {modal === 'manual' && activityData && (
+      {modal === 'manual' && activityData && activityData.viewerIsOwner && (
         <ManualSetDialog
           data={activityData}
           busy={busy}
@@ -858,7 +905,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
             if (result) {
               setModal(null);
               setBluePlayerIds(firstTwoSlotIds(result.players));
-              setScreen('set-setup');
+              setScreen(activityScreen(result));
             }
           }}
         />
@@ -900,7 +947,7 @@ function AppHeader({
 
         <div className="header-actions">
           {activity?.activity.status === 'active' && (
-            <button className="live-pill" onClick={() => onNavigate(activity.activity.state.phase === 'live' ? 'scoreboard' : 'set-setup')}>
+            <button className="live-pill" onClick={() => onNavigate(activityScreen(activity))}>
               <span /> {activityTitle(activity.activity.activityNumber)}
             </button>
           )}
@@ -1274,8 +1321,8 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
   onOpenActivity: (id: string) => void;
 }) {
   const logsByActivity = useMemo(() => groupLogs(data.logs), [data.logs]);
-  const recoverableActivity = data.activities.find((activity) => activity.status === 'active')
-    ?? data.activities.find((activity) => activity.status === 'abandoned');
+  const liveActivities = data.activities.filter((activity) => activity.status === 'active');
+  const abandonedActivity = data.activities.find((activity) => activity.status === 'abandoned');
   return (
     <main className="page-content">
       <section className="context-topline">
@@ -1316,14 +1363,22 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
             <div className="panel-heading"><div><UsersRound size={19} /><h2>{copy.dashboard.playersTitle}</h2></div></div>
             <div>{data.players.map((player, index) => <span key={player.id}><span className={`avatar avatar-${index + 1}`}>{initials(player.name)}</span><small>{player.name}</small></span>)}</div>
           </section>
-          {recoverableActivity && (
+          {liveActivities.map((activity) => (
+            <section className="resume-panel" key={activity.id}>
+              <span className="live-dot"><span /> {copy.dashboard.liveActivity}</span>
+              <h3>{copy.dashboard.ownerActivity(activity.ownerName)}</h3>
+              <button className="secondary-button" onClick={() => onOpenActivity(activity.id)}>
+                {activity.viewerAccepted ? copy.dashboard.resumeScoring : copy.dashboard.join}
+                {' '}<ChevronRight size={17} />
+              </button>
+            </section>
+          ))}
+          {abandonedActivity && (
             <section className="resume-panel">
-              <span className="live-dot"><span /> {recoverableActivity.status === 'active' ? copy.dashboard.liveActivity : copy.dashboard.savedPartial}</span>
-              <h3>{activityTitle(recoverableActivity.activityNumber)}</h3>
-              <button className="secondary-button" onClick={() => onOpenActivity(recoverableActivity.id)}>
-                {recoverableActivity.status !== 'active'
-                  ? copy.dashboard.reviewResult
-                  : recoverableActivity.viewerAccepted ? copy.dashboard.resumeScoring : copy.dashboard.join}
+              <span className="live-dot"><span /> {copy.dashboard.savedPartial}</span>
+              <h3>{copy.dashboard.ownerActivity(abandonedActivity.ownerName)}</h3>
+              <button className="secondary-button" onClick={() => onOpenActivity(abandonedActivity.id)}>
+                {copy.dashboard.reviewResult}
                 {' '}<ChevronRight size={17} />
               </button>
             </section>
@@ -1387,7 +1442,7 @@ function SettingGroup<T extends string>({ title, icon, options, value, onChange 
   );
 }
 
-function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh, onFinish, busy }: {
+function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh, onFinish, onAssignControllers, busy }: {
   data: ActivityData;
   blueIds: string[];
   onBlueChange: (ids: string[]) => void;
@@ -1395,6 +1450,7 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
   onShare: () => void;
   onRefresh: () => void;
   onFinish: () => void;
+  onAssignControllers: (ids: string[]) => void;
   busy: boolean;
 }) {
   const slots = matchSlotsFrom(data.players);
@@ -1407,15 +1463,36 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
     ? registeredPlayers.filter((player) => acceptedIds.has(player.id)).length
     : 0;
   const waitingForAccepts = !consentKnown || inCount < registeredPlayers.length;
+  const paused = activityIsPaused(data.pendingPlayerIds);
+  const isOwner = data.viewerIsOwner;
+  const toggleController = (playerId: string) => {
+    const selected = new Set(data.controllerUserIds);
+    if (selected.has(playerId)) {
+      if (selected.size <= 1) return;
+      selected.delete(playerId);
+    } else {
+      if (selected.size >= 2) return;
+      selected.add(playerId);
+    }
+    onAssignControllers([...selected]);
+  };
   return (
     <main className="page-content setup-page">
       <section className="activity-heading">
-        <div><span className="live-dot"><span /> {activityTitle(data.activity.activityNumber)}</span><h1>{copy.live.setTeamsHeading(data.activity.state.setNumber)}</h1><p>{copy.live.setTeamsIntro}</p></div>
+        <div>
+          <span className="live-dot"><span /> {copy.dashboard.ownerActivity(data.ownerName)}</span>
+          <h1>{copy.live.setTeamsHeading(data.activity.state.setNumber)}</h1>
+          <p>{isOwner ? copy.live.setTeamsIntro : copy.live.ownerOnlyTeams}</p>
+        </div>
         <div className="heading-actions">
           <button className="icon-text-button" onClick={onRefresh} disabled={busy}><RefreshCw size={18} /> {copy.chrome.refresh}</button>
           <button className="icon-text-button" onClick={onShare}><Share2 size={18} /> {copy.live.share}</button>
         </div>
       </section>
+
+      {paused && (
+        <p className="pause-banner">{copy.live.pausedWaiting(pendingPlayerNames(data))}</p>
+      )}
 
       <section className="team-builder">
         <div className="team-preview blue-preview"><span>{copy.live.blueTeam}</span><strong>{bluePlayers.length === 2 ? bluePlayers.map((player) => player.name).join(' & ') : copy.live.chooseTwoPlayers}</strong></div>
@@ -1435,7 +1512,11 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
               <span className={`avatar avatar-${index % 4 + 1}`}>{initials(player.name)}</span>
               <div>
                 <strong>{player.name}</strong>
-                <small>{isIn ? copy.live.accepted : copy.live.notOpened}</small>
+                <small>{isIn ? copy.live.accepted : (
+                  data.logs.length > 0 || data.activity.state.setNumber > 1
+                    ? copy.live.leftWaitingToRejoin
+                    : copy.live.notOpened
+                )}</small>
               </div>
               <span className={isIn ? 'consent-status in' : 'consent-status pending'}>{isIn ? copy.live.in : copy.live.pending}</span>
             </div>
@@ -1446,26 +1527,62 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
         )}
       </section>
 
-      <section className="assign-panel">
-        <div className="section-title"><h2>{copy.live.blueTeamPlayers}</h2><span>{copy.live.blueSelected(blueIds.length)}</span></div>
-        <div className="assign-grid">
-          {slots.map((player, index) => {
-            const selected = blueIds.includes(player.id);
-            return (
-              <button key={player.id} className={selected ? 'selected' : ''} onClick={() => onBlueChange(toggleBlue(blueIds, player.id))} disabled={!selected && blueIds.length === 2}>
-                <span className={`avatar avatar-${index + 1}`}>{initials(player.name)}</span><strong>{player.name}</strong><span className="check-circle">{selected && <Check size={15} />}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      {isOwner && (
+        <section className="consent-roster">
+          <div className="section-title">
+            <h2>{copy.live.scoreControllers}</h2>
+            <span>{copy.live.scoreControllerSlot(data.controllerUserIds.length)}</span>
+          </div>
+          <p>{copy.live.scoreControllersHint}</p>
+          <div className="assign-grid">
+            {registeredPlayers.filter((player) => acceptedIds.has(player.id)).map((player, index) => {
+              const selected = data.controllerUserIds.includes(player.id);
+              return (
+                <button
+                  key={player.id}
+                  className={selected ? 'selected' : ''}
+                  onClick={() => toggleController(player.id)}
+                  disabled={busy || (!selected && data.controllerUserIds.length >= 2)}
+                >
+                  <span className={`avatar avatar-${index + 1}`}>{initials(player.name)}</span>
+                  <strong>{player.name}</strong>
+                  <span className="check-circle">{selected && <Check size={15} />}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {isOwner && (
+        <section className="assign-panel">
+          <div className="section-title"><h2>{copy.live.blueTeamPlayers}</h2><span>{copy.live.blueSelected(blueIds.length)}</span></div>
+          <div className="assign-grid">
+            {slots.map((player, index) => {
+              const selected = blueIds.includes(player.id);
+              return (
+                <button key={player.id} className={selected ? 'selected' : ''} onClick={() => onBlueChange(toggleBlue(blueIds, player.id))} disabled={!selected && blueIds.length === 2}>
+                  <span className={`avatar avatar-${index + 1}`}>{initials(player.name)}</span><strong>{player.name}</strong><span className="check-circle">{selected && <Check size={15} />}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="current-log">
         <div className="section-title"><h2>{copy.live.thisActivity}</h2><span>{copy.live.completedCount(data.logs.length)}</span></div>
         {data.logs.length === 0 ? <div className="empty-line">{copy.live.noCompletedSets}</div> : data.logs.map((log) => <SetLogRow key={log.id} log={log} players={data.players} />)}
       </section>
 
-      <div className="setup-actions"><button className="quiet-button" onClick={onFinish}>{copy.live.finishActivity}</button><button className="primary-button" onClick={onStart} disabled={blueIds.length !== 2 || busy || waitingForAccepts}>{copy.live.startSet(data.activity.state.setNumber)} <ChevronRight size={18} /></button></div>
+      {isOwner && (
+        <div className="setup-actions">
+          <button className="quiet-button" onClick={onFinish}>{copy.live.finishActivity}</button>
+          <button className="primary-button" onClick={onStart} disabled={blueIds.length !== 2 || busy || waitingForAccepts}>
+            {copy.live.startSet(data.activity.state.setNumber)} <ChevronRight size={18} />
+          </button>
+        </div>
+      )}
     </main>
   );
 }
@@ -1484,8 +1601,23 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
   const state = data.activity.state;
   const blueNames = namesFor(data.players, state.bluePlayerIds);
   const redNames = namesFor(data.players, state.redPlayerIds);
-  const scoringDisabled = data.activity.status !== 'active' || busy || status === 'offline'
-    || Boolean(state.pendingGameWinner || state.pendingSetWinner);
+  const paused = activityIsPaused(data.pendingPlayerIds);
+  const canScore = data.viewerIsController && !paused && state.phase === 'live'
+    && data.activity.status === 'active' && !busy && status !== 'offline'
+    && !state.pendingGameWinner && !state.pendingSetWinner;
+  const scoringDisabled = !canScore;
+  const showWatching = !data.viewerIsController && state.phase === 'live';
+  const banner = paused
+    ? copy.live.pausedWaiting(pendingPlayerNames(data))
+    : state.pendingGameWinner && !data.viewerIsOwner
+      ? copy.live.waitingForOwnerToConfirmGame(data.ownerName)
+      : state.pendingSetWinner && !data.viewerIsOwner
+        ? copy.live.waitingForOwnerToConfirmSet(data.ownerName)
+        : state.phase === 'set-setup'
+          ? copy.live.waitingForNextSet(data.ownerName)
+          : showWatching
+            ? copy.live.watchingHint
+            : null;
   const decisive = data.activity.config.deuceRule === 'golden-point' && state.blueScore === '40' && state.redScore === '40'
     ? copy.configure.deuce.goldenPoint.label
     : state.decisivePointActive ? copy.configure.deuce.starPoint.label : null;
@@ -1493,17 +1625,21 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
     ? null
     : state.blueGames > state.redGames ? 'blue' : 'red';
   return (
-    <main className="scoreboard-page">
+    <main className={banner ? 'scoreboard-page has-banner' : 'scoreboard-page'}>
       <section className="score-statusbar">
         <div><span>{activityTitle(data.activity.activityNumber)}</span><strong>{copy.live.setNumber(state.setNumber)}</strong></div>
         <div className="status-items">
           <StatusIndicator status={status} />
-          <span className="device-count"><Smartphone size={15} /> {copy.live.deviceCap(data.devices.filter((device) => device.slotStatus !== 'released').length)}</span>
+          <span className="device-count"><Smartphone size={15} /> {copy.live.controllerCap(data.controllerUserIds.length)}</span>
           <button onClick={onHistory} aria-label={copy.live.scoreHistory} title={copy.live.scoreHistory}><History size={19} /></button>
           <button onClick={onShare} aria-label={copy.live.shareActivity} title={copy.live.shareActivity}><Share2 size={19} /></button>
           <button onClick={onLeave} aria-label={copy.live.leaveActivity} title={copy.live.leaveActivity}><LogOut size={19} /></button>
         </div>
       </section>
+
+      {banner && (
+        <p className={paused ? 'score-banner paused' : 'score-banner watching'}>{banner}</p>
+      )}
 
       <section className="score-court" aria-label={copy.live.scoreboardAria}>
         <button className={gamesLead === 'blue' ? 'score-team blue-team leading' : 'score-team blue-team'} onClick={() => onPoint('blue')} disabled={scoringDisabled} aria-label={copy.live.pointToBlueAria(blueNames)}>
@@ -1514,7 +1650,7 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
             <span className={gamesLead === 'blue' ? 'team-games leading' : 'team-games'}>
               <span>{copy.live.games}</span><strong>{state.blueGames}</strong>
             </span>
-            <span className="tap-label"><Plus size={17} /> {copy.live.point}</span>
+            {canScore && <span className="tap-label"><Plus size={17} /> {copy.live.point}</span>}
           </span>
         </button>
 
@@ -1536,15 +1672,19 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
             <span className={gamesLead === 'red' ? 'team-games leading' : 'team-games'}>
               <span>{copy.live.games}</span><strong>{state.redGames}</strong>
             </span>
-            <span className="tap-label"><Plus size={17} /> {copy.live.point}</span>
+            {canScore && <span className="tap-label"><Plus size={17} /> {copy.live.point}</span>}
           </span>
         </button>
       </section>
 
       <section className="score-controls">
-        <button onClick={onUndo} disabled={state.history.length === 0 || busy}><RotateCcw size={18} /> {copy.live.undo}</button>
+        {data.viewerIsOwner ? (
+          <button onClick={onUndo} disabled={state.history.length === 0 || busy || paused}><RotateCcw size={18} /> {copy.live.undo}</button>
+        ) : <span />}
         <div className="rule-summary">{deuceLabel(data.activity.config.deuceRule)}<span>·</span>{setLabel(data.activity.config.setWinRule)}</div>
-        <button onClick={onManual}><Clock3 size={18} /> {copy.live.endSet}</button>
+        {data.viewerIsOwner && state.phase === 'live' ? (
+          <button onClick={onManual}><Clock3 size={18} /> {copy.live.endSet}</button>
+        ) : <span />}
       </section>
     </main>
   );

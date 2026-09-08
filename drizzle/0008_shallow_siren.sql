@@ -1,0 +1,1 @@
+ALTER TABLE `activities` ADD `controller_user_ids_json` text;

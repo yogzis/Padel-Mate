@@ -447,7 +447,7 @@ The history is shown through a modal opened from the in-game scoreboard page.
 Requirements:
 
 - The modal shows only the current game in the active set and activity.
-- Both connected devices can open and view the history.
+- Accepted members can open and view the history.
 - History entries are based on backend-accepted score events.
 - Each entry shows the timestamp, action, previous score, next score, and user/device label.
 - User/device labels use the signed-in user's display name, such as `Yoni's device`.
@@ -534,18 +534,19 @@ The backend must broadcast accepted score events to all devices connected to the
 
 ### 15.3 Shared Session Capacity
 
-Each activity session allows a maximum of 2 connected or reserved device slots.
+The activity owner assigns 1 or 2 accepted registered players as live-score controllers. Default is the owner. Guests cannot be controllers.
 
 Rules:
 
-- A signed-in host creates the activity session.
-- The host can share a WhatsApp-friendly or plain-text message containing the join link or session code.
-- A signed-in user can join if a device slot is available.
-- A third device attempting to join receives an error stating that the activity session is full.
-- Explicit logout or leave releases a device slot immediately.
-- Unexpected disconnect reserves the device slot for 1-2 minutes.
+- A signed-in owner creates the activity session and is the initial controller.
+- The owner can share a WhatsApp-friendly or plain-text message containing the join link or session code.
+- A signed-in context member can accept. They may watch the live score if a set is in play.
+- Only assigned controllers may submit score updates.
+- A player can be in only one active activity. Joining or creating another leaves the previous one.
+- Participant Leave revokes consent and pauses scoring until they rejoin.
+- Owner Leave closes the activity for everyone (abandon if a set is live, otherwise finish).
+- Explicit logout or unexpected disconnect still uses device reservation for 1-2 minutes and does not pause play.
 - A reconnecting device can reclaim its reserved slot during the reservation window.
-- After the reservation expires, another device may take the slot.
 
 ### 15.4 Abandoned Session Handling
 
