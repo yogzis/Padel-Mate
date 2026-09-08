@@ -70,18 +70,22 @@
 - [ ] Share action can create WhatsApp-friendly or plain-text invite message.
 - [x] Creating an activity records the host as accepted.
 - [x] Entering a code or opening a share link records consent for a registered member.
-- [x] A registered member can accept when both device slots are taken.
+- [x] A registered member can accept whether or not they are a live-score controller.
 - [x] Start set stays disabled until every registered member has accepted.
+- [x] Only the activity owner can select teams, start a set, finish, undo, confirm, and assign controllers.
 - [x] Set setup shows every registered member as In or Pending. Guests are not listed.
 - [x] A live activity the viewer has not accepted offers Join instead of Resume scoring.
+- [x] Live activities on the dashboard are listed as the owner's activity. Several may be open in one group.
+- [x] A player can be in only one activity at a time.
 - [x] The open context dashboard polls every 5 seconds so a newly created activity offers Join without a page reload.
 - [x] A browser refresh returns to the last open scoring group unless the user had gone back to Groups or Mates.
 - [x] An activity is numbered only after the first set starts. Empty sessions do not take a number.
 - [x] A finished activity sends the user to that context dashboard instead of leaving them on the activity screen.
 - [ ] A second device can join the shared activity session.
-- [x] A third registered member can accept without occupying a device slot.
-- [ ] Connected device can leave or log out to release its slot.
-- [ ] Unexpected disconnect reserves the slot for 1-2 minutes.
+- [x] A third registered member can accept without occupying a scoring controller slot.
+- [x] Participant Leave revokes consent, pauses the activity, and returns the leaver to the group dashboard.
+- [x] Owner Leave closes the activity for everyone; a live set is abandoned with no leaderboard impact.
+- [ ] Unexpected disconnect reserves the slot for 1-2 minutes and does not pause play.
 - [ ] Unconcluded activity with all devices disconnected is abandoned after 3 hours.
 - [ ] Abandoned activity preserves latest score snapshot without leaderboard impact.
 - [ ] Score updates on one device appear on the other connected device.
@@ -122,8 +126,8 @@
 - [ ] Realtime session updates use backend-accepted event ordering.
 - [ ] Connected devices converge to the same active score state.
 - [ ] Reconnecting devices fetch latest backend state before accepting score input.
-- [ ] Session capacity logic counts connected and reserved device slots.
-- [x] Activity consent is stored separately from device slots.
+- [x] Owner-assigned controllers and exclusive join are enforced in the store.
+- [x] Activity consent is stored separately from device presence.
 - [x] createActivity re-checks that registered members are still mates of the host.
 - [x] selectContext re-checks that registered members form a mate clique.
 - [x] setupSet refuses until every registered member has a consent row.
@@ -232,10 +236,12 @@
 - [ ] Host can generate or display a share link or session code.
 - [ ] Host can generate a WhatsApp-friendly or plain-text invite message.
 - [ ] Second device can join an active activity session.
-- [x] Third registered member can accept when 2 device slots are connected or reserved.
-- [x] Accepting when slots are full does not occupy a live device slot.
+- [x] Third registered member can accept without becoming a live-score controller.
+- [x] Accepting does not by itself grant scoring.
 - [x] A person outside the context cannot accept or join.
-- [ ] Explicit leave releases a device slot immediately.
+- [x] A player can be in only one active activity at a time.
+- [x] Participant leave revokes consent and pauses until rejoin.
+- [x] Owner leave abandons a live set or finishes a non-live activity.
 - [ ] Unexpected disconnect reserves the slot for 1-2 minutes.
 - [ ] Reconnect during the reservation window reclaims the slot.
 - [ ] Reservation expiry allows a different device to join.
@@ -255,7 +261,7 @@
 ### History and Retention Tests
 
 - [ ] Current-game history modal shows only the active current game.
-- [ ] Both connected devices can open the current-game history modal.
+- [ ] Accepted members can open the current-game history modal.
 - [ ] History entries include timestamp, action, previous score, next score, and user/device label.
 - [ ] History entries use signed-in user display names in labels.
 - [ ] New game resets the visible current-game history.

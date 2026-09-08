@@ -125,15 +125,15 @@ Activity duration is not part of the MVP logic. Before starting an activity, the
 
 An activity is numbered only after the first set starts. Until then the UI shows Activity, not Activity #N. Creating, sharing, waiting for accepts, or finishing with no sets does not take a number. Numbers are sequential per context among activities that have been played.
 
-An activity can be shared with another device through a session link or session code. Connected devices view and operate on the same active scoring state.
+An activity can be shared so every registered member can accept. The owner assigns 1 or 2 accepted players as live-score controllers. Only those devices get a writable red-blue scoreboard. Other accepted members can watch the live score but cannot update it.
+
+A player can be in only one activity at a time. The group dashboard lists every live activity as the owner's activity, such as Yoni's activity.
 
 New scores require two things: the registered members are still mates of the host, and every registered member has accepted this activity. The host accepts by creating it. Everyone else accepts by entering the session code or opening the share link. Guests never accept and never rank.
 
-Consent is not a device slot. Only 2 devices may be connected or temporarily reserved at the same time. If a registered member accepts when both slots are taken, they are still accepted and the first set can start. One connected phone can score for everyone after that.
+A connected device can log out or leave the session. If a participant leaves, their consent is revoked, they return to the group dashboard, and the activity pauses until they rejoin. If the owner leaves, or joins or creates another activity, their owned activity is closed for everyone: abandoned with a snapshot if a set is live, or finished if not.
 
-A connected device can log out or leave the session to release its slot for another device.
-
-If a device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available.
+If a device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available. Unexpected disconnects do not pause the activity.
 
 If all devices disconnect and the activity is not concluded, the activity remains live for 3 hours. After 3 hours, it is marked abandoned with the latest saved score snapshot and no leaderboard impact.
 
@@ -172,10 +172,9 @@ Platform roles:
 
 Activity roles:
 
-- Host: the signed-in user who creates the activity session and is accepted immediately.
-- Participant: a registered member of the context who accepts the activity by code or share link. They also connect as a live device when a slot is free.
-
-Both connected devices may view and update the live scoreboard unless future permissions restrict this.
+- Owner: the signed-in user who creates the activity. They are accepted immediately. Only the owner selects teams, starts a set, finishes the activity, assigns live-score controllers, undoes a point, confirms a game or set, and ends a set early. Those actions work from the lobby or the live scoreboard.
+- Controller: 1 or 2 accepted registered players chosen by the owner. Default is the owner only. Their devices show the writable red-blue live scoreboard and may tap points. Guests cannot be controllers. Switching controllers takes effect immediately.
+- Participant: a registered member of the context who accepts the activity by code or share link. If they are not a controller, they stay on the lobby or a read-only live score with a watching hint.
 
 ### Account Suspension
 
@@ -209,18 +208,19 @@ Authentication is required for global app access in the MVP.
 9. The user selects required activity configuration settings.
 10. The user starts the configured activity and is recorded as accepted.
 11. The user shares the activity session so every other registered member can accept.
-12. After every registered member has accepted, the user starts the first set.
-13. The user selects Blue Team and Red Team for the set.
-14. The user tracks points in the live scoreboard.
-15. After each point tap, the app persists the updated current game state to the backend.
-16. Other devices connected to the same activity session receive the updated score.
-17. If the app reloads during a live activity, the latest saved game state is restored. If the user was on a group dashboard, that group opens again.
-18. When a game-ending score is reached, the app asks for confirmation before updating the set score.
-19. When a set-ending score is reached, the app asks for confirmation before updating the context leaderboard.
-20. The user may manually end an unfinished set when the real activity time is over.
-21. If a set is manually ended, the user must confirm whether to calculate the partial set score or disregard the set.
-22. The user may start another set with a new team pairing.
-23. The user may end the activity and return to the context dashboard. If the activity is already finished, any device that still has that session open, reloads it, or opens its share link is taken to the same context dashboard instead of staying on the activity screen.
+12. The owner assigns 1 or 2 accepted players as live-score controllers. Default is the owner only.
+13. After every registered member has accepted, the owner starts the first set.
+14. The owner selects Blue Team and Red Team for the set.
+15. Controllers track points on the live scoreboard. Other accepted members see a read-only score.
+16. After each point tap, the app persists the updated current game state to the backend.
+17. Other devices in the same activity receive the updated score.
+18. If the app reloads during a live activity, the latest saved game state is restored. If the user was on a group dashboard, that group opens again.
+19. When a game-ending score is reached, the owner confirms before updating the set score.
+20. When a set-ending score is reached, the owner confirms before updating the context leaderboard.
+21. The owner may manually end an unfinished set when the real activity time is over.
+22. If a set is manually ended, the owner must confirm whether to calculate the partial set score or disregard the set.
+23. The owner may start another set with a new team pairing. Controllers stay on the live panel between sets.
+24. The owner may end the activity and return to the context dashboard. If the activity is already finished or abandoned, any device that still has that session open, reloads it, or opens its share link is taken to the same context dashboard instead of staying on the activity screen.
 
 ## 6. Activity Configuration Requirements
 
@@ -413,6 +413,8 @@ Acceptance criteria:
 - Provide an action to start a new activity when every registered member is still a mate of the viewer.
 - Hide or disable New activity when any registered member is no longer a mate. History, leaderboard, and old set logs stay.
 - A live activity the viewer has not accepted yet offers Join. Resume scoring is only for a viewer who has already accepted.
+- Each live activity is listed as the owner's activity, such as Yoni's activity. Several live activities may appear in the same group.
+- A player can accept or create only one activity at a time. Joining or creating another leaves the previous one: a participant pause, or the owner closing their owned activity.
 - While the dashboard is open, the app refreshes that group every 5 seconds and again when the tab becomes visible, so Join appears without a page reload when another member starts an activity.
 - A browser refresh returns to the last open scoring group. Going back to Groups or Mates clears that restore.
 
@@ -441,6 +443,7 @@ Acceptance criteria:
 - Team pairing can change between sets.
 - The Set Setup page must show the current activity session's set log for transparency.
 - Start set stays disabled until every registered context member has accepted this activity.
+- Only the activity owner can select teams, start a set, or finish the activity.
 - The Set Setup page shows every registered member as In or Pending. Guests are not in that list.
 
 ### FR-7 Live Game Scoreboard
@@ -453,8 +456,9 @@ Acceptance criteria:
 - Display large scores: 0, 15, 30, 40, A.
 - Support mobile portrait and mobile landscape layouts.
 - Preserve score readability and tap comfort in both orientations.
-- Provide a point button for Blue Team.
-- Provide a point button for Red Team.
+- Provide a point button for Blue Team, usable only by assigned live-score controllers.
+- Provide a point button for Red Team, usable only by assigned live-score controllers.
+- Non-controllers see the same score layout as read-only, with a watching hint rather than an error.
 - Provide undo for recent scoring actions.
 - Show the current set score on each team's color, with the leading team's games emphasized so it is clear who is ahead in portrait and landscape.
 - Show the current activity and set state.
@@ -563,12 +567,13 @@ Acceptance criteria:
 - Connected devices receive game confirmation and set confirmation state changes made by another device.
 - Connected devices receive manual unfinished-set conclusion state changes made by another device.
 - The live scoreboard must show connection status for the shared session.
-- No more than 2 devices may be connected or reserved in the same activity session.
-- Opening a code or share link records consent for a registered context member before any device slot is taken.
-- If both device slots are taken, a registered member is still accepted and can see the activity. They do not occupy a live slot.
+- No more than 2 accepted registered players may be assigned as live-score controllers. Default is the owner. Guests cannot be controllers.
+- Opening a code or share link records consent for a registered context member.
+- A player can be in only one activity at a time.
+- If a participant leaves, consent is revoked, they return to the group dashboard with Join, and scoring pauses until they rejoin.
+- If the owner leaves, or joins or creates another activity, their owned activity is closed for everyone. A live set is abandoned with a snapshot and no leaderboard impact. Otherwise the activity is finished.
 - A person who is not a registered member of the context cannot accept or join.
-- A connected device can log out or leave the session to release its slot.
-- If a connected device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available.
+- If a connected device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available. Unexpected disconnects do not pause the activity.
 - If all devices disconnect before the activity is concluded, the activity remains live for 3 hours.
 - After 3 hours with no connected devices, an unconcluded activity is marked abandoned with the latest saved scoring snapshot and no leaderboard impact.
 - A signed-in user may later reopen an abandoned activity and manually choose whether to calculate a partial set or disregard it.
@@ -585,7 +590,7 @@ Acceptance criteria:
 
 - The live scoreboard must include a button to open score update history.
 - The history opens in a modal.
-- Both connected devices can access the history modal.
+- Accepted members can access the history modal.
 - The displayed history includes only the current game within the active set and activity.
 - Each entry includes timestamp, action, previous score, next score, and the user/device label.
 - User/device labels must use the signed-in user's display name, such as `Yoni's device`.
@@ -690,9 +695,9 @@ Included:
 - Context-specific leaderboard.
 - Backend persistence for every live score update.
 - Local browser cache for short-term resilience while backend saves retry.
-- Shareable activity sessions for up to 2 connected devices.
+- Shareable activity sessions with owner-assigned live-score controllers.
 - Near real-time in-game score synchronization across connected devices.
-- 2-device session capacity limit.
+- One activity per player, with concurrent group activities listed by owner name.
 - 1-2 minute reservation window for unexpected device disconnects.
 - 3-hour abandoned-session handling with no automatic leaderboard impact.
 
