@@ -2,6 +2,7 @@
 
 import { Check, Copy, Link2, Share2, Smartphone, X } from 'lucide-react';
 import { useState } from 'react';
+import { copy } from '../copy';
 
 export type ShareInviteDevice = {
   deviceId: string;
@@ -34,7 +35,7 @@ export function ShareInviteDialog({
 }) {
   const [copied, setCopied] = useState(false);
 
-  const copy = async () => {
+  const copyInvite = async () => {
     await navigator.clipboard.writeText(copyValue);
     setCopied(true);
   };
@@ -42,7 +43,7 @@ export function ShareInviteDialog({
   return (
     <div className="modal-backdrop" role="presentation">
       <div className="dialog share-dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
-        <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
+        <button className="modal-close" onClick={onClose} aria-label={copy.chrome.closeAria}><X size={19} /></button>
         <span className="dialog-icon"><Link2 size={23} /></span>
         <h2 id="share-title">{title}</h2>
         <p>{description}</p>
@@ -52,9 +53,9 @@ export function ShareInviteDialog({
           <strong>{displayValue}</strong>
         </div>
         <div className="share-actions">
-          <button className="primary-button" onClick={copy}>
+          <button className="primary-button" onClick={copyInvite}>
             {copied ? <Check size={18} /> : <Copy size={18} />}
-            {copied ? 'Copied' : 'Copy invite'}
+            {copied ? copy.chrome.copied : copy.chrome.copyInvite}
           </button>
           <a
             className="whatsapp-button"
@@ -62,7 +63,7 @@ export function ShareInviteDialog({
             target="_blank"
             rel="noreferrer"
           >
-            <Share2 size={18} /> WhatsApp
+            <Share2 size={18} /> {copy.chrome.whatsapp}
           </a>
         </div>
         {devices && devices.length > 0 && (

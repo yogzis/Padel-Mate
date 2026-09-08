@@ -58,6 +58,7 @@ export type ContextSummary = {
   name: string;
   playerIds: string[];
   createdAt: string;
+  lastPlayedAt: string | null;
 };
 
 export type LeaderboardEntry = {

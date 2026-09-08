@@ -111,7 +111,11 @@ A, B, C, E
 
 Each context has its own leaderboard and activity history.
 
-If a member later removes another member as a mate, the existing context stays visible with its leaderboard and past set logs. It becomes history-only: nobody can start a new activity there until the registered members are mates of the host again.
+The stored group name is the display name shown in the Groups list. Today it is generated from the registered players and any guest slots. A later rename would edit that same field.
+
+A new group opened from the mate picker is created only when every registered pair are mates with each other. Opening an existing group from the list does not require that clique. Starting a new activity in a group still requires every registered member to be a mate of the host.
+
+If a member later removes another member as a mate, the existing context stays visible with its leaderboard and past set logs. It becomes history-only for that viewer: they cannot start a new activity there until every registered member is a mate of theirs again.
 
 ### Activity
 
@@ -197,7 +201,7 @@ Authentication is required for global app access in the MVP.
 1. The user opens the app.
 2. The user signs in.
 3. The user invites mates by link, or already has mates.
-4. The user fills four match slots with two to four mates and any remaining slots as guests.
+4. The user fills four match slots with two to four mates who are also mates with each other, and any remaining slots as guests. Existing groups can be opened from the list without re-picking.
 5. The app automatically identifies an existing scoreboard context or creates a new one.
 6. The app opens the context dashboard.
 7. If another member starts an activity in this group, Join appears on the open dashboard without a page reload.
@@ -379,11 +383,20 @@ Acceptance criteria:
 - Between two and four slots must be registered players chosen from the user's mates.
 - Remaining slots may be anonymous guests.
 - User cannot continue with fewer than two registered players.
+- The mate picker hides people who are not mates with everyone already selected. You and the current selection stay visible so they can be deselected.
+- Continue creates or opens a context only when every registered pair are mates with each other. Guests do not count. The error names the pair that is not yet mates.
+- Opening an existing group from the list requires membership only, not a clique.
 - The app creates a deterministic context key from the registered player IDs only.
 - Guest slots never affect which context is selected.
 - If the context exists, it is opened.
 - If the context does not exist, it is created automatically.
 - A user only sees contexts they are a member of.
+- The Groups list can be searched by the stored group name, case-insensitively. That name is the future editable display name. A clear control at the end of the search field empties the query.
+- The Groups list has a sort dropdown: Last played (default), Date created, Name A–Z. Groups with no activity sort last under Last played. Date created is newest first.
+- The Groups list has a filter dropdown: All, Can play, History. Can play means every other registered member is still a mate of the viewer. History means at least one member is not.
+- The first visit uses Last played and All. After the viewer chooses Sort or Filter, that choice persists for that user on this device. Search does not persist.
+- History groups show a History tag at the end of the row.
+- The Groups list scrolls when it has more than 5 rows.
 
 ### FR-4 Context Dashboard
 
@@ -658,6 +671,9 @@ Included:
 - Mates list refreshes when the screen opens and from a Refresh control.
 - Anonymous guest slots that play without ranking.
 - Context selection from two to four registered players, with automatic context creation.
+- Groups list search by name, sort (Last played, Date created, Name A–Z), and filter (All, Can play, History).
+- History tag on Groups list rows the viewer cannot start play in.
+- Mate picker limited to people who are mates with everyone already selected.
 - Context dashboard.
 - Leaderboard scoring hint opened from an info icon.
 - Context dashboard polls so Join appears when another member starts an activity.
@@ -684,6 +700,7 @@ Deferred:
 
 - Larger multi-device room management beyond the active activity session.
 - Sign-in providers beyond Google.
+- Editable group display names.
 - Payment or club management.
 - Advanced tournaments.
 - Player photos.

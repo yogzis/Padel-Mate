@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import { copy } from '../../../../copy';
 import { auth } from '../../../../lib/auth';
 import { listAdminUsers } from '../../../../lib/server/admin-users';
 import { StoreError } from '../../../../lib/server/store';
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     const userId = requiredString(body.userId, 'userId');
 
     if (userId === admin.userId) {
-      throw new StoreError(400, 'You cannot suspend your own account.');
+      throw new StoreError(400, copy.admin.cannotSuspendSelf);
     }
 
     if (action === 'suspend') {
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     } else if (action === 'restore') {
       await auth.api.unbanUser({ headers: await headers(), body: { userId } });
     } else {
-      throw new StoreError(400, 'Unknown request.');
+      throw new StoreError(400, copy.admin.unknownRequest);
     }
 
     return json({ users: await listAdminUsers() });
@@ -55,13 +56,13 @@ function toBanSeconds(durationDays: unknown): number | undefined {
 
   const days = Number(durationDays);
   if (!Number.isFinite(days) || days <= 0) {
-    throw new StoreError(400, 'Suspension length must be a positive number of days.');
+    throw new StoreError(400, copy.admin.suspensionDaysInvalid);
   }
   return Math.round(days * SECONDS_PER_DAY);
 }
 
 function requiredString(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new StoreError(400, `Missing ${name}.`);
+  if (typeof value !== 'string' || !value.trim()) throw new StoreError(400, copy.admin.missingParam(name));
   return value.trim();
 }
 
@@ -77,5 +78,5 @@ function json(data: unknown, status = 200) {
 function errorResponse(error: unknown) {
   if (error instanceof StoreError) return json({ error: error.message }, error.status);
   console.error(error);
-  return json({ error: 'Something went wrong. Please try again.' }, 500);
+  return json({ error: copy.admin.genericError }, 500);
 }
