@@ -1,0 +1,16 @@
+---
+description: Put new user-facing strings in copy/en/, not in JSX or throws
+alwaysApply: true
+---
+
+# Copy Catalog
+
+User-facing sentences belong in `copy/en/`, grouped by screen. Components, API routes, and `StoreError` throws import `copy` from `copy/index.ts`.
+
+Do not add headings, buttons, placeholders, aria-labels, empty states, toasts, or product error messages as string literals in UI or store code.
+
+Keep interpolations as functions in the catalog (`copy.invite.nowMates(name)`), not concatenated fragments.
+
+Leave loaded data in place: player names, group names, scores, dates, and counts. Leave developer-only throws such as a missing database binding.
+
+A second language later is another values file that matches the `Copy` type. Do not add an i18n library until a second locale exists.

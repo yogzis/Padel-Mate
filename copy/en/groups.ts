@@ -1,0 +1,38 @@
+export const groups = {
+  eyebrow: 'Scoring groups',
+  title: 'Choose your court crew',
+  joinActivity: 'Join activity',
+  joinCodePlaceholder: '6-digit code',
+  join: 'Join',
+  listTitle: 'Your scoring groups',
+  searchLabel: 'Search',
+  searchPlaceholder: 'Search groups',
+  searchClearAria: 'Clear search',
+  sortLabel: 'Sort',
+  sortLastPlayed: 'Last played',
+  sortDateCreated: 'Date created',
+  sortName: 'Name A–Z',
+  filterLabel: 'Filter',
+  filterAll: 'All',
+  filterCanPlay: 'Can play',
+  filterHistory: 'History',
+  empty: 'No groups match.',
+  historyPill: 'History',
+  builderTitle: 'Create or find a scoring group',
+  builderIntro: 'Pick two to four people. If you pick fewer than four, the remaining court spots are guests and do not rank.',
+  emptyTitle: 'Invite a mate to start scoring',
+  emptyBody: 'A match needs at least two registered players. Guests can fill the other slots.',
+  inviteMates: 'Invite mates',
+  mateRole: 'Mate',
+  circleHint: 'None of your other mates are also mates with everyone already selected. Let them know to invite each other, or open with guests.',
+  openScoreboard: 'Open scoreboard',
+  emptyName: 'Scoring group',
+  needOneMate: 'Choose at least one mate so two registered players are in the match.',
+  memberSummary: (registered: number, guests: number) => (
+    guests > 0
+      ? `${registered} registered · ${guests} guest${guests > 1 ? 's' : ''}`
+      : `${registered} registered`
+  ),
+  filteredCount: (visible: number, total: number) => `${visible}/${total}`,
+  selectionCount: (selected: number) => `${selected} of 2–4 selected`,
+};
