@@ -23,6 +23,7 @@ import {
   getContext,
   joinActivity,
   leaveActivity,
+  assignControllers,
   scorePoint,
   selectContext,
   setupSet,
@@ -101,6 +102,9 @@ export async function POST(request: Request) {
       case 'setup-set':
         data = await setupSet(user, body.activityId, body.deviceId, body.bluePlayerIds);
         break;
+      case 'assign-controllers':
+        data = await assignControllers(user, body.activityId, body.deviceId, body.controllerUserIds);
+        break;
       case 'score-point':
         data = await scorePoint(
           user,
@@ -114,25 +118,25 @@ export async function POST(request: Request) {
         data = await undoScore(user, body.activityId, body.deviceId, body.clientMutationId);
         break;
       case 'confirm-game':
-        data = await confirmGame(body.activityId, body.deviceId);
+        data = await confirmGame(user, body.activityId, body.deviceId);
         break;
       case 'cancel-game':
         data = await cancelGame(user, body.activityId, body.deviceId, body.clientMutationId);
         break;
       case 'confirm-set':
-        data = await confirmSet(body.activityId, body.deviceId);
+        data = await confirmSet(user, body.activityId, body.deviceId);
         break;
       case 'cancel-set':
-        data = await cancelSet(body.activityId, body.deviceId);
+        data = await cancelSet(user, body.activityId, body.deviceId);
         break;
       case 'manual-set':
-        data = await concludeManualSet(body.activityId, body.deviceId, body.choice);
+        data = await concludeManualSet(user, body.activityId, body.deviceId, body.choice);
         break;
       case 'finish-activity':
-        data = await finishActivity(body.activityId, body.deviceId);
+        data = await finishActivity(user, body.activityId, body.deviceId);
         break;
       case 'leave-activity':
-        data = await leaveActivity(body.activityId, body.deviceId);
+        data = await leaveActivity(user, body.activityId, body.deviceId);
         break;
       default:
         throw new StoreError(400, copy.errors.unknownRequest);

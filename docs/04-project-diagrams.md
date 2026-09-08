@@ -207,32 +207,28 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[Host Opens Active Activity] --> B[Share Session Link or Code]
-  B --> C[Second Device Opens Link or Enters Code]
+  A[Owner Opens Active Activity] --> B[Share Session Link or Code]
+  B --> C[Member Opens Link or Enters Code]
   C --> D[Sign In Required]
-  D --> E{Session Has Device Slot?}
-  E -->|No| F[Show Activity Session Full Error]
-  E -->|Yes| G[Fetch Latest Backend Activity State]
-  G --> H[Restore Context, Teams, Set Score, and Game Score]
-  H --> I[Subscribe to Realtime Session Updates]
-  I --> J[Show Connected Live Scoreboard]
+  D --> E[Record Consent and Presence]
+  E --> F{Owner Assigned This Player as Controller?}
+  F -->|Yes and set is live| G[Writable Live Scoreboard]
+  F -->|No and set is live| H[Read-Only Live Score]
+  F -->|Set setup| I[Activity Lobby]
 ```
 
 ## 1.3 Activity Session Slot Lifecycle
 
 ```mermaid
 flowchart TD
-  A[Device Joins Session] --> B{Fewer Than 2 Connected or Reserved Slots?}
-  B -->|No| C[Reject Join: Session Full]
-  B -->|Yes| D[Reserve Device Slot]
-  D --> E[Device Connected]
-  E --> F{Leaves Explicitly?}
-  F -->|Yes| G[Release Slot Immediately]
-  F -->|No| H{Unexpected Disconnect?}
-  H -->|Yes| I[Reserve Slot for 1-2 Minutes]
-  I --> J{Device Reconnects Before Expiry?}
-  J -->|Yes| E
-  J -->|No| G
+  A[Member Leaves Activity] --> B{Owner?}
+  B -->|Yes live set| C[Abandon With Snapshot]
+  B -->|Yes not live| D[Finish Activity]
+  B -->|No| E[Revoke Consent and Pause]
+  C --> F[Everyone Returns to Group Dashboard]
+  D --> F
+  E --> G[Leaver Sees Join on Group Dashboard]
+  G --> H[Rejoin Restores Consent and Unpauses]
 ```
 
 ## 1.4 Abandoned Session Flow
@@ -521,9 +517,9 @@ erDiagram
     string pointsFormula
     string status
     string createdByUserId
+    string controllerUserIdsJson
     string shareCode
     string shareUrl
-    int maxConnectedDevices
     string allDevicesDisconnectedAt
     string abandonedAt
     string abandonmentSnapshotId

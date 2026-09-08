@@ -62,6 +62,7 @@ export const activities = sqliteTable('activities', {
   stateJson: text('state_json').notNull(),
   version: integer('version').notNull().default(0),
   createdByUserId: text('created_by_user_id').notNull(),
+  controllerUserIdsJson: text('controller_user_ids_json'),
   startedAt: text('started_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   allDevicesDisconnectedAt: text('all_devices_disconnected_at'),

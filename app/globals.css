@@ -475,6 +475,11 @@ label:has(select:focus-visible) {
 .scoreboard-shell { height: 100dvh; overflow: hidden; background: #101712; }
 .scoreboard-shell .app-header { display: none; }
 .scoreboard-page { display: grid; height: 100dvh; grid-template-rows: 54px minmax(0, 1fr) 58px; background: #101712; color: white; }
+.scoreboard-page.has-banner { grid-template-rows: 54px auto minmax(0, 1fr) 58px; }
+.score-banner { margin: 8px 14px 0; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; text-align: center; }
+.score-banner.watching { background: rgba(255,255,255,.12); color: #e8eee9; }
+.score-banner.paused { background: #5c4a12; color: #ffe9a8; }
+.pause-banner { margin: 0 0 16px; border-radius: 8px; background: #fff8e8; padding: 12px 14px; color: #5c4a12; font-size: 14px; font-weight: 650; }
 .score-statusbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid rgba(255,255,255,.12); padding: 0 14px; }
 .score-statusbar > div:first-child { display: flex; align-items: baseline; gap: 9px; }
 .score-statusbar > div:first-child span { color: #aab5ae; font-size: 10px; font-weight: 750; text-transform: uppercase; }

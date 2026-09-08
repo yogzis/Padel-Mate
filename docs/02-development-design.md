@@ -8,7 +8,7 @@ The most important engineering rule is that scoring decisions must be handled by
 
 Live game state must be persisted to the backend after every score update. The backend is the source of truth for active scoring recovery.
 
-Activity sessions must support up to 2 connected devices. Updates accepted by the backend must be broadcast to all devices in the shared session so both devices converge to the same live score.
+Activity sessions support owner-assigned live-score controllers (1 or 2 accepted players). Updates accepted by the backend must be broadcast so every viewer converges to the same live score.
 
 ## 2. Suggested Architecture
 
@@ -209,8 +209,9 @@ Responsible for:
 - Preventing duplicate point application during retries.
 - Keeping in-game persistence separate from set completion and leaderboard updates.
 - Creating and resolving shareable activity session links or codes.
-- Enforcing the 2-device limit for each activity session.
-- Recording activity consent separately from device slots.
+- Enforcing owner, controller, and pause authorization for scoring and activity mutations.
+- Recording activity consent separately from device presence.
+- Allowing only one active activity per player: joining or creating another leaves the previous one.
 - Blocking selectContext when the registered players are not all mates with each other.
 - Blocking a new activity when any registered context member is no longer a mate of the host.
 - Blocking the first set until every registered context member has accepted.
@@ -334,9 +335,9 @@ type Activity = {
   config: ActivityConfig;
   status: "active" | "completed" | "abandoned";
   createdByUserId: string;
+  controllerUserIds: string[];
   shareCode?: string;
   shareUrl?: string;
-  maxConnectedDevices: 2;
   allDevicesDisconnectedAt?: string;
   abandonedAt?: string;
   abandonmentSnapshotId?: string;
@@ -561,7 +562,7 @@ Display:
 - Context leaderboard, with an info hint that explains the points formula, guest rule, columns, and sort order.
 - Cards, tables, and set-log names stay inside the page width on phones. Names wrap instead of overflowing.
 - Last 5 numbered activity session set logs, grouped by activity number and date. Empty sessions that never started a set are excluded.
-- A live activity card with Join or Resume scoring, depending on whether the viewer has accepted. The card appears from the dashboard poll when another member starts an activity.
+- A live activity card per open activity, titled with the owner's name. Join or Resume scoring, depending on whether the viewer has accepted.
 
 ### 6.4 Activity Configuration Screen
 
@@ -596,10 +597,12 @@ Validation:
 - Each team has exactly 2 players.
 - Every context player is assigned once.
 - Start set stays disabled until every registered member is In.
+- Only the owner can pick teams, start a set, finish, or assign live-score controllers.
 
 Display:
 
 - A roster of every registered member as In or Pending. Guests are not listed.
+- Owner picker for 1-2 live-score controllers among accepted players.
 - Current activity session set log only.
 - Completed sets.
 - Manual partial sets.
@@ -694,17 +697,18 @@ Postconditions:
 
 - New activity is created without an activity number.
 - Activity status is active.
-- Host is recorded as accepted.
+- Host is recorded as accepted and as the sole live-score controller.
 - Host device joins the activity session.
 - User moves to set setup.
 - Start set stays disabled until every other registered member is In.
-- Set setup shows every registered member as In or Pending.
+- Only the owner can start a set, finish, or assign controllers.
 
 ### 7.2 Starting a Set
 
 Preconditions:
 
 - Active activity exists.
+- The signed-in user is the owner.
 - Every registered context member has accepted this activity.
 - Blue Team has 2 players.
 - Red Team has 2 players.
@@ -721,6 +725,8 @@ Postconditions:
 Preconditions:
 
 - Active set exists.
+- The signed-in user is an assigned live-score controller.
+- Every registered member currently has consent (the activity is not paused).
 - No unresolved game completion confirmation is open.
 - Latest backend state has been loaded.
 - Shared session connection is either connected or the app has confirmed it can safely queue/retry the update.
@@ -809,9 +815,9 @@ Preconditions:
 Postconditions:
 
 - The user must be a registered member of the activity's context.
-- Consent is written first.
-- If fewer than 2 devices are connected or reserved, the device also joins the session.
-- If 2 devices are already connected or reserved, the member is still accepted and the activity is returned. They do not occupy a live slot.
+- Consent is written first, and the device is recorded for presence.
+- If the player already owns or has accepted another active activity, that other activity is left: owned activities are closed, participated ones are paused.
+- Controllers assigned by the owner receive the writable live scoreboard when a set is live. Other accepted members receive a read-only score or the lobby.
 - A connected joining device receives a label based on the signed-in user's display name, such as `Yoni's device`.
 - The client loads the latest backend state, including who has accepted and who is still pending.
 - If the activity is already finished, the client opens that context dashboard instead of the activity screen.
@@ -820,13 +826,13 @@ Postconditions:
 
 Preconditions:
 
-- Device is connected to an activity session.
+- The signed-in user has accepted the activity.
 
 Postconditions:
 
-- Explicit logout or leave releases the device slot immediately.
-- Other connected devices receive an updated participant count.
-- Another signed-in device may join if a slot is available.
+- A participant Leave revokes consent, releases their device, removes them from the controller list, and pauses scoring until they rejoin. They are taken to the group dashboard with Join.
+- An owner Leave closes the activity for everyone: abandon with snapshot if a set is live, otherwise finish. Everyone is taken to the group dashboard.
+- Unexpected disconnect still reserves the device for 1-2 minutes and does not pause the activity.
 
 ### 7.10 Unexpected Device Disconnect
 
@@ -1060,17 +1066,16 @@ Google is the MVP provider. Provider records should be stored separately from us
 
 ### 9.6 Session Capacity Requirements
 
-Each activity session supports exactly 2 connected or reserved device slots.
+The owner assigns 1 or 2 accepted registered players as live-score controllers. Default is the owner. Guests cannot be controllers.
 
-Consent is a separate record on `activity_consents`. Accepting does not consume a slot.
+Consent is a separate record on `activity_consents`. A player may have consent for only one active activity at a time.
 
 Rules:
 
-- Explicit leave or logout releases a slot immediately.
-- Unexpected disconnect changes the slot to reserved.
-- Reserved slots expire after 1-2 minutes.
-- A registered member who accepts while both slots are taken is accepted and not connected.
-- A person who is not a registered context member cannot accept or take a slot.
+- Participant Leave revokes consent and pauses the activity until they rejoin.
+- Owner Leave, or the owner joining or creating another activity, closes the owned activity for everyone.
+- Unexpected disconnect changes the device to reserved for 1-2 minutes and does not pause play.
+- A person who is not a registered context member cannot accept.
 - If all devices disconnect, the activity remains live for 3 hours.
 - After 3 hours with no connected devices, the activity is marked abandoned.
 - Abandoned activity sessions preserve the latest scoring snapshot but do not update the leaderboard.
@@ -1130,7 +1135,7 @@ Required:
 - Manual partial set winner detection.
 - Disregarded set behavior.
 - Shared session join behavior.
-- Shared session 2-device capacity.
+- Shared session controller assignment and exclusive join.
 - Slot release and 1-2 minute reservation expiry.
 - Abandoned session marking with no leaderboard impact.
 - Realtime event ordering.
@@ -1188,7 +1193,7 @@ Required:
 5. Build scoring engine.
 6. Build leaderboard engine.
 7. Build backend persistence model and API.
-8. Build realtime shared session channel with 2-device capacity.
+8. Build realtime shared session channel with owner-assigned controllers.
 9. Build local recovery cache.
 10. Build the My Padel Mates screen.
 11. Build context selection screen.
