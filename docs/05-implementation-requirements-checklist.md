@@ -43,6 +43,12 @@
 - [ ] Context dashboard displays only the selected context.
 - [x] The group leaderboard has an info hint that explains points, guests, columns, and sort order.
 - [x] A user only sees contexts they belong to.
+- [x] Groups list can be searched by name, sorted, and filtered to All, Can play, or History. A typed search can be cleared from the end of the field.
+- [x] Groups list Sort and Filter persist for that user on this device after the first choice.
+- [x] History groups show a History tag on the Groups list.
+- [x] Groups list scrolls when it has more than 5 rows.
+- [x] Mate picker hides people who are not mates with everyone already selected.
+- [x] selectContext refuses a lineup that is not a mate clique.
 - [x] Context dashboard displays the last 5 numbered activity session set logs by activity number and date. Empty sessions do not occupy that window.
 - [ ] Activity cannot start without required configuration.
 - [x] Star Point is listed first and selected by default on the activity configuration screen.
@@ -118,6 +124,7 @@
 - [ ] Session capacity logic counts connected and reserved device slots.
 - [x] Activity consent is stored separately from device slots.
 - [x] createActivity re-checks that registered members are still mates of the host.
+- [x] selectContext re-checks that registered members form a mate clique.
 - [x] setupSet refuses until every registered member has a consent row.
 - [x] Activity log retention keeps the latest 5 numbered activity session logs per context. Empty sessions do not occupy that window.
 - [ ] Activity log purging does not alter leaderboard aggregates.
@@ -153,6 +160,11 @@
 - [x] Same registered players in different order produce the same context key.
 - [x] Different player combination produces a different context key.
 - [x] Guest slots do not affect the context key.
+- [x] Group list search ignores case and trims the query.
+- [x] Can play vs History follows whether every other member is a mate of the viewer.
+- [x] Last played sorts never-played groups last.
+- [x] Missing or junk group list prefs use Last played and All.
+- [x] Picker hides a mate who is not connected to the current selection and keeps a selected mate visible.
 - [ ] Fewer than two registered players is refused.
 - [ ] Guests receive no leaderboard entry while their partner scores normally.
 - [ ] Existing context is reused.
@@ -278,6 +290,7 @@
 - [ ] The Set Setup page displays the current activity session set log.
 - [ ] The Context Dashboard displays retained set logs grouped by activity number and date.
 - [x] Context dashboard cards stay inside the page width with all leaderboard columns and set-log names visible.
+- [ ] Groups list search, sort, and filter stay usable on phones.
 - [x] The group leaderboard info icon opens a scoring hint and closes when the user taps outside.
 - [ ] The live scoreboard has a clear saved/saving/retry-needed indicator.
 - [ ] The live scoreboard has a clear connected/reconnecting/offline indicator.

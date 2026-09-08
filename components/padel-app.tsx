@@ -49,13 +49,24 @@ import {
   guestSlotId,
   isGuestSlot,
 } from '../lib/player-identity';
+import {
+  filterGroupList,
+  groupListPrefsKey,
+  parseGroupListPrefs,
+  serializeGroupListPrefs,
+  viewerCanPlayInGroup,
+  type GroupListFilter,
+  type GroupListSort,
+} from '../lib/group-list';
+import { visiblePickerPlayers, type MateCircle } from '../lib/mate-circle';
 import { formatMateInviteCountdown } from '../lib/mate-invite';
 import { awardPoint } from '../lib/scoring';
 import { ShareInviteDialog } from './share-invite-dialog';
+import { ChromeSelect } from './chrome-select';
 import { useMateInviteCountdown } from './use-mate-invite-countdown';
 
 type AppUser = { id: string; displayName: string; email: string; isAdmin: boolean };
-type BootstrapData = { user: AppUser; mates: Mate[]; contexts: ContextSummary[] };
+type BootstrapData = { user: AppUser; mates: Mate[]; mateCircle: MateCircle; contexts: ContextSummary[] };
 type ContextData = {
   context: ContextSummary;
   players: Player[];
@@ -210,13 +221,13 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
     setMatesRefreshing(true);
     setError('');
     try {
-      const [mates, openInvite] = await Promise.all([
-        apiGet<Mate[]>('mates'),
+      const [data, openInvite] = await Promise.all([
+        apiGet<BootstrapData>('bootstrap'),
         apiGet<MateInviteLink | null>('open-invite'),
       ]);
-      setBootstrap((current) => (current ? { ...current, mates } : current));
+      setBootstrap(data);
       setInvite(openInvite);
-      setSelectedPlayerIds((current) => keepSelectablePlayerIds(current, initialUser.id, mates));
+      setSelectedPlayerIds((current) => keepSelectablePlayerIds(current, initialUser.id, data.mates));
     } catch (caught) {
       setError(messageOf(caught));
     } finally {
@@ -940,8 +951,44 @@ function GroupsView({
   onInviteMates: () => void;
   busy: boolean;
 }) {
-  const selectable = selectablePlayers(bootstrap);
+  const [groupQuery, setGroupQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [groupFilter, setGroupFilter] = useState<GroupListFilter>(
+    () => loadGroupListPrefs(bootstrap.user.id).filter,
+  );
+  const [groupSort, setGroupSort] = useState<GroupListSort>(
+    () => loadGroupListPrefs(bootstrap.user.id).sort,
+  );
+
+  useEffect(() => {
+    saveGroupListPrefs(bootstrap.user.id, { sort: groupSort, filter: groupFilter });
+  }, [bootstrap.user.id, groupFilter, groupSort]);
+  const mateIds = useMemo(() => new Set(bootstrap.mates.map((mate) => mate.id)), [bootstrap.mates]);
+  const visibleGroups = useMemo(() => filterGroupList(bootstrap.contexts, {
+    viewerId: bootstrap.user.id,
+    mateIds,
+    query: groupQuery,
+    filter: groupFilter,
+    sort: groupSort,
+  }), [bootstrap.contexts, bootstrap.user.id, mateIds, groupQuery, groupFilter, groupSort]);
+  const selfPlayer = useMemo((): Player => ({
+    id: bootstrap.user.id,
+    name: bootstrap.user.displayName,
+    createdAt: '',
+  }), [bootstrap.user.displayName, bootstrap.user.id]);
+  const selectable = useMemo(
+    () => visiblePickerPlayers(selfPlayer, selectedIds, bootstrap.mates, bootstrap.mateCircle ?? {}),
+    [bootstrap.mateCircle, bootstrap.mates, selectedIds, selfPlayer],
+  );
   const canOpen = selectedIds.length >= MIN_REGISTERED_PLAYERS_PER_CONTEXT;
+  const hiddenMateCount = bootstrap.mates.length - (selectable.length - 1);
+  const hasVisibleUnselectedMate = selectable.some((player) => (
+    player.id !== bootstrap.user.id && !selectedIds.includes(player.id)
+  ));
+  const showCircleHint = hiddenMateCount > 0 && !hasVisibleUnselectedMate && selectedIds.length < MATCH_SLOT_COUNT;
+  const groupCountLabel = visibleGroups.length === bootstrap.contexts.length
+    ? String(visibleGroups.length)
+    : `${visibleGroups.length}/${bootstrap.contexts.length}`;
 
   return (
     <main className="page-content">
@@ -955,17 +1002,76 @@ function GroupsView({
 
       {bootstrap.contexts.length > 0 && (
         <section className="section-band">
-          <div className="section-title"><h2>Your scoring groups</h2><span>{bootstrap.contexts.length}</span></div>
-          <div className="group-list">
-            {bootstrap.contexts.map((context) => (
-              <button key={context.id} className="group-row" onClick={() => onOpen(context.id)}>
-                <div className="avatar-stack">{context.playerIds.slice(0, 4).map((id, index) => (
-                  <span key={id} className={`avatar avatar-${index + 1}`}>{initials(nameForContextMember(bootstrap, id))}</span>
-                ))}</div>
-                <div className="group-copy"><strong>{context.name}</strong><span>{context.playerIds.length} registered{context.playerIds.length < MATCH_SLOT_COUNT ? ` · ${MATCH_SLOT_COUNT - context.playerIds.length} guest${MATCH_SLOT_COUNT - context.playerIds.length > 1 ? 's' : ''}` : ''}</span></div>
-                <ChevronRight size={20} />
-              </button>
-            ))}
+          <div className="section-title"><h2>Your scoring groups</h2><span>{groupCountLabel}</span></div>
+          <div className="group-panel">
+            <div className="group-toolbar">
+              <label className="group-search" htmlFor="group-search">Search
+                <span className="group-search-field">
+                  <input
+                    ref={searchInputRef}
+                    id="group-search"
+                    value={groupQuery}
+                    onChange={(event) => setGroupQuery(event.target.value)}
+                    placeholder="Search groups"
+                  />
+                  {groupQuery.length > 0 && (
+                    <button
+                      type="button"
+                      className="group-search-clear"
+                      aria-label="Clear search"
+                      onClick={() => {
+                        setGroupQuery('');
+                        searchInputRef.current?.focus();
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </span>
+              </label>
+              <ChromeSelect
+                id="group-sort"
+                label="Sort"
+                value={groupSort}
+                onChange={setGroupSort}
+                options={[
+                  { value: 'last-played', label: 'Last played' },
+                  { value: 'date-created', label: 'Date created' },
+                  { value: 'name', label: 'Name A–Z' },
+                ]}
+              />
+              <ChromeSelect
+                id="group-filter"
+                label="Filter"
+                value={groupFilter}
+                onChange={setGroupFilter}
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'can-play', label: 'Can play' },
+                  { value: 'history', label: 'History' },
+                ]}
+              />
+            </div>
+            <div className="group-list">
+              {visibleGroups.length === 0 ? (
+                <div className="empty-line">No groups match.</div>
+              ) : visibleGroups.map((context) => {
+                const canPlay = viewerCanPlayInGroup(bootstrap.user.id, context.playerIds, mateIds);
+                return (
+                  <button key={context.id} className="group-row" onClick={() => onOpen(context.id)}>
+                    <div className="avatar-stack">{context.playerIds.slice(0, 4).map((id, index) => (
+                      <span key={id} className={`avatar avatar-${index + 1}`}>{initials(nameForContextMember(bootstrap, id))}</span>
+                    ))}</div>
+                    <div className="group-copy">
+                      <strong>{context.name}</strong>
+                      <span>{context.playerIds.length} registered{context.playerIds.length < MATCH_SLOT_COUNT ? ` · ${MATCH_SLOT_COUNT - context.playerIds.length} guest${MATCH_SLOT_COUNT - context.playerIds.length > 1 ? 's' : ''}` : ''}</span>
+                    </div>
+                    <span className={canPlay ? 'history-pill is-empty' : 'history-pill'}>History</span>
+                    <ChevronRight size={20} />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
@@ -997,6 +1103,9 @@ function GroupsView({
                 );
               })}
             </div>
+            {showCircleHint && (
+              <p className="picker-hint">None of your other mates are also mates with everyone selected. Invite them to each other, or open with guests.</p>
+            )}
             <div className="builder-actions">
               <button className="secondary-button" onClick={onInviteMates}><UserPlus size={18} /> Invite mates</button>
               <button className="primary-button" disabled={!canOpen || busy} onClick={onContinue}>Open scoreboard <ChevronRight size={18} /></button>
@@ -1591,15 +1700,6 @@ function keepSelectablePlayerIds(current: string[], selfId: string, mates: Mate[
   return kept.includes(selfId) ? kept : [selfId, ...kept];
 }
 
-function selectablePlayers(bootstrap: BootstrapData): Player[] {
-  const self: Player = {
-    id: bootstrap.user.id,
-    name: bootstrap.user.displayName,
-    createdAt: '',
-  };
-  return [self, ...bootstrap.mates];
-}
-
 function nameForContextMember(bootstrap: BootstrapData, playerId: string) {
   if (playerId === bootstrap.user.id) return bootstrap.user.displayName;
   return bootstrap.mates.find((mate) => mate.id === playerId)?.name ?? 'Player';
@@ -1676,4 +1776,14 @@ function rememberContext(contextId: string) {
 function forgetContext() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(LAST_CONTEXT_KEY);
+}
+
+function loadGroupListPrefs(userId: string) {
+  if (typeof window === 'undefined') return parseGroupListPrefs(null);
+  return parseGroupListPrefs(localStorage.getItem(groupListPrefsKey(userId)));
+}
+
+function saveGroupListPrefs(userId: string, prefs: { sort: GroupListSort; filter: GroupListFilter }) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(groupListPrefsKey(userId), serializeGroupListPrefs(prefs));
 }

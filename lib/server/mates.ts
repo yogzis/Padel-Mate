@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { MATE_INVITE_LIFETIME_MS, type Mate, type MateInviteLink } from '../domain';
 import { remainingMateInviteMs } from '../mate-invite';
+import { mateCircleFromEdges, type MateCircle } from '../mate-circle';
 import { StoreError } from './errors';
 
 type InviteRow = {
@@ -147,6 +148,22 @@ export async function listMates(playerId: string): Promise<Mate[]> {
   ).bind(playerId).all<{ id: string; name: string; created_at: string }>();
 
   return result.results.map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
+}
+
+export async function listMateCircle(playerId: string, mateIds: readonly string[]): Promise<MateCircle> {
+  const circleIds = [playerId, ...mateIds];
+  if (circleIds.length === 1) return mateCircleFromEdges(circleIds, []);
+
+  const placeholders = circleIds.map(() => '?').join(',');
+  const edges = await db().prepare(
+    `SELECT player_id, mate_player_id FROM mates
+     WHERE player_id IN (${placeholders}) AND mate_player_id IN (${placeholders})`,
+  ).bind(...circleIds, ...circleIds).all<{ player_id: string; mate_player_id: string }>();
+
+  return mateCircleFromEdges(
+    circleIds,
+    edges.results.map((row) => ({ playerId: row.player_id, matePlayerId: row.mate_player_id })),
+  );
 }
 
 export async function removeMate(playerId: string, matePlayerIdValue: unknown): Promise<{ ok: true }> {

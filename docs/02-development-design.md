@@ -141,6 +141,8 @@ Use that key to find or create the context.
 
 Guest slots are deliberately absent from the key, so the same mates always land in the same context regardless of who substitutes.
 
+New contexts opened from the picker require every registered pair to be mates with each other. Existing contexts stay openable from the Groups list. Starting a new activity still requires every registered member to be a mate of the host.
+
 ### Scoring Engine
 
 Responsible for:
@@ -198,6 +200,7 @@ Responsible for:
 - Creating and resolving shareable activity session links or codes.
 - Enforcing the 2-device limit for each activity session.
 - Recording activity consent separately from device slots.
+- Blocking selectContext when the registered players are not all mates with each other.
 - Blocking a new activity when any registered context member is no longer a mate of the host.
 - Blocking the first set until every registered context member has accepted.
 - Releasing a session slot when a device logs out or leaves.
@@ -496,11 +499,14 @@ Validation:
 
 Purpose:
 
-Pick two to four registered players from your mates, then open the matching scoreboard context. Remaining court spots become guests automatically and are not shown in this picker.
+Pick two to four registered players, then open the matching scoreboard context. Remaining court spots become guests automatically and are not shown in this picker. The Groups list shows existing contexts the user belongs to.
 
 Controls:
 
-- Mate selection list.
+- Group name search, sort, and filter, in the same card as the scoring groups list.
+- Sort menu: Last played (default), Date created, Name A–Z. Filter menu: All, Can play, History. Both are branded chrome menus, not native selects.
+- Scoring groups list, with a History tag at the trailing edge of rows the viewer cannot start play in. The list scrolls after 5 rows.
+- Mate selection list. Unselected mates who are not mates with everyone already selected are hidden. You and the current selection stay visible.
 - Selected count indicator.
 - Continue button.
 
@@ -509,8 +515,19 @@ Validation:
 - Continue disabled unless at least two registered players are selected, including the signed-in user.
 - Continue disabled if more than four registered players are selected.
 - Guests are filled automatically on submit when fewer than four people are selected. They are not toggled or displayed here.
+- Continue / `selectContext` requires every registered pair to be mates with each other. Opening a group from the list does not.
 - The context is identified from the registered players only, so guests never change which context opens.
 - App automatically identifies or creates the context.
+
+Display:
+
+- Search, sort, and filter sit in the list card header. Search fills leftover width; sort and filter size to their options. A typed search shows a clear control at the end of the field.
+- The first visit uses Last played and All. After the viewer chooses Sort or Filter, that choice persists for that user on this device. Search does not persist.
+- Search matches the stored group name, which is the future editable display name.
+- Can play means every other member is still a mate of the viewer. History is the rest.
+- Last played uses the latest activity update time. Groups with no activity sort last.
+- The History tag sits at the trailing edge of the row, before the open chevron.
+- When the picker has hidden every remaining mate, show a short hint that they can still continue with guests.
 
 ### 6.3 Context Dashboard Screen
 
@@ -889,6 +906,7 @@ The app should handle these cases:
 
 - Attempt to use app data without sign-in.
 - Attempt to start a context without four filled slots, or with fewer than two registered players.
+- Attempt to open a new lineup whose registered players are not all mates with each other.
 - Attempt to consume an expired, already-used, replaced, or self-issued invite link.
 - Attempt to delete an invite that has already been accepted.
 - Attempt to decline a valid invite link.
@@ -1083,6 +1101,8 @@ Required:
 - Automatic player creation on first sign-in, including the idempotent fallback.
 - Invite link creation, replacement of the unused previous invite, single use, expiry, and self-invite rejection.
 - Context key generation from registered players only, ignoring guest slots.
+- Group list search, All / Can play / History filter, and last-played / created / name sort.
+- Mate picker hides people who are not in the current selected circle.
 - Guest slots excluded from leaderboard writes while their partner still scores.
 - Context visibility limited to members.
 - Context key generation.
@@ -1114,6 +1134,8 @@ Recommended:
 - Accept an invite link after confirming and see the new mate.
 - Decline an invite link and remain without that mate.
 - Fill four slots with three mates and one guest, then create the context.
+- Search, sort, and filter the Groups list, including a History tag on groups the viewer cannot start.
+- Hide a mate in the picker who is not mates with everyone already selected.
 - Start activity after configuration.
 - Start set with teams.
 - Share an activity session and join from a second device.

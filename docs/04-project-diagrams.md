@@ -266,7 +266,25 @@ flowchart TD
   H --> I
 ```
 
-## 2.1 Context Dashboard Sync
+## 2.1 Groups List and Picker
+
+```mermaid
+flowchart TD
+  bootstrap[Bootstrap contexts plus mate circle]
+  search[Name search]
+  filter["All / Can play / History"]
+  sort["Last played / Date created / Name"]
+  list[Scrollable group list]
+  picker[Mate picker]
+  clique[Hide mates not in current circle]
+  continue[selectContext clique check]
+  bootstrap --> search --> filter --> sort --> list
+  bootstrap --> picker --> clique --> continue
+```
+
+Opening a group from the list uses membership only. Continue requires every registered pair to be mates.
+
+## 2.2 Context Dashboard Sync
 
 ```mermaid
 flowchart TD

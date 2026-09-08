@@ -19,9 +19,10 @@ import {
   guestSlotId,
   registeredPlayerIdsOf,
 } from '../player-identity';
+import { directedMateKey, firstMissingMatePair } from '../mate-circle';
 import { awardPoint, isSetWinningScore, snapshot, undoPoint, winningPlayerPoints } from '../scoring';
 import { StoreError } from './errors';
-import { listMates } from './mates';
+import { listMateCircle, listMates } from './mates';
 import { ensurePlayerRecord } from './players';
 
 export { StoreError };
@@ -70,6 +71,7 @@ export async function getBootstrap(user: AppUser) {
     listMates(user.userId),
     listContextsForPlayer(user.userId),
   ]);
+  const mateCircle = await listMateCircle(user.userId, mates.map((mate) => mate.id));
 
   return {
     user: {
@@ -79,6 +81,7 @@ export async function getBootstrap(user: AppUser) {
       isAdmin: user.isAdmin,
     },
     mates,
+    mateCircle,
     contexts,
   };
 }
@@ -87,9 +90,11 @@ export async function getBootstrap(user: AppUser) {
 async function listContextsForPlayer(playerId: string): Promise<ContextSummary[]> {
   const [contextResult, membershipResult] = await db().batch([
     db().prepare(
-      `SELECT c.id, c.name, c.created_at FROM scoreboard_contexts c
+      `SELECT c.id, c.name, c.created_at,
+        (SELECT MAX(a.updated_at) FROM activities a WHERE a.context_id = c.id) AS last_played_at
+       FROM scoreboard_contexts c
        JOIN context_players cp ON cp.context_id = c.id
-       WHERE cp.player_id = ? ORDER BY c.created_at DESC`,
+       WHERE cp.player_id = ?`,
     ).bind(playerId),
     db().prepare(
       `SELECT context_id, player_id FROM context_players
@@ -103,6 +108,7 @@ async function listContextsForPlayer(playerId: string): Promise<ContextSummary[]
     id: String(row.id),
     name: String(row.name),
     createdAt: String(row.created_at),
+    lastPlayedAt: row.last_played_at == null ? null : String(row.last_played_at),
     playerIds: memberships.filter((item) => item.context_id === row.id).map((item) => item.player_id),
   }));
 }
@@ -131,7 +137,7 @@ export async function selectContext(user: AppUser, slotIdsValue: unknown) {
     throw new StoreError(400, 'One or more selected players no longer exist.');
   }
 
-  await assertPlayersAreMates(user.userId, playerIds);
+  await assertPlayersFormMateClique(user.userId, playerIds, found.results);
 
   const key = contextKeyFor(slotIds);
   const existing = await db().prepare('SELECT id FROM scoreboard_contexts WHERE context_key = ?')
@@ -173,6 +179,37 @@ async function assertPlayersAreMates(userId: string, playerIds: readonly string[
   if (!(await playersAreStillMates(userId, playerIds))) {
     throw new StoreError(403, 'You can only score matches with your mates.');
   }
+}
+
+async function assertPlayersFormMateClique(
+  userId: string,
+  playerIds: readonly string[],
+  players: readonly { id: string; name: string }[],
+) {
+  if (!playerIds.includes(userId)) {
+    throw new StoreError(400, 'You must be one of the players in the match.');
+  }
+
+  const placeholders = playerIds.map(() => '?').join(',');
+  const edges = await db().prepare(
+    `SELECT player_id, mate_player_id FROM mates
+     WHERE player_id IN (${placeholders}) AND mate_player_id IN (${placeholders})`,
+  ).bind(...playerIds, ...playerIds).all<{ player_id: string; mate_player_id: string }>();
+
+  const directedKeys = new Set(
+    edges.results.map((row) => directedMateKey(row.player_id, row.mate_player_id)),
+  );
+  const missing = firstMissingMatePair(playerIds, directedKeys);
+  if (!missing) return;
+
+  const names = new Map(players.map((player) => [player.id, player.name]));
+  const labelFor = (playerId: string) => (
+    playerId === userId ? 'You' : names.get(playerId) ?? 'Player'
+  );
+  throw new StoreError(
+    403,
+    `${labelFor(missing[0])} and ${labelFor(missing[1])} need to be mates with each other before you can open this group.`,
+  );
 }
 
 async function playersAreStillMates(userId: string, playerIds: readonly string[]): Promise<boolean> {
@@ -262,8 +299,11 @@ async function attachViewerAcceptance<T extends { id: string }>(
 }
 
 export async function getContext(contextId: string, viewerPlayerId?: string) {
-  const context = await db().prepare('SELECT id, name, created_at FROM scoreboard_contexts WHERE id = ?')
-    .bind(contextId).first<{ id: string; name: string; created_at: string }>();
+  const context = await db().prepare(
+    `SELECT id, name, created_at,
+      (SELECT MAX(a.updated_at) FROM activities a WHERE a.context_id = scoreboard_contexts.id) AS last_played_at
+     FROM scoreboard_contexts WHERE id = ?`,
+  ).bind(contextId).first<{ id: string; name: string; created_at: string; last_played_at: string | null }>();
   if (!context) throw new StoreError(404, 'Scoring group not found.');
 
   if (viewerPlayerId) {
@@ -306,6 +346,7 @@ export async function getContext(contextId: string, viewerPlayerId?: string) {
       id: context.id,
       name: context.name,
       createdAt: context.created_at,
+      lastPlayedAt: context.last_played_at == null ? null : context.last_played_at,
       playerIds: (playersResult.results as Record<string, unknown>[]).map((row) => String(row.id)),
     },
     players: (playersResult.results as Record<string, unknown>[]).map(mapPlayer),
