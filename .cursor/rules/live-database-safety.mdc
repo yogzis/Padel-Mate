@@ -1,0 +1,45 @@
+---
+description: Protect live D1 data when planning or changing schema, migrations, queries, or persisted JSON
+alwaysApply: true
+---
+
+# Live Database Safety
+
+Production Cloudflare D1 holds real user data. The local SQLite file can be wiped; production cannot. Treat any schema, migration, query, or persistence change as a data-safety change.
+
+## When planning or choosing an approach
+
+Before recommending a path, say whether it needs a schema change, a data backfill, or only application code.
+
+- Prefer application-level changes when they achieve the same outcome without touching tables.
+- If a table, column, index, constraint, or persisted JSON shape must change, describe the migration, how existing rows stay valid, and what would crash the live app if skipped.
+- Never plan a production reset, truncate, or drop-and-recreate. `npm run db:reset` is local-only.
+
+## Schema and migrations
+
+Source of truth: `db/schema.ts` plus generated files in `drizzle/`. Tables are never created at runtime.
+
+1. Change `db/schema.ts`. Regenerate `db/auth-schema.ts` with `npm run db:generate:auth` — do not hand-edit it.
+2. Run `npm run db:generate` and **read the SQL** before keeping it.
+3. Existing rows must satisfy every new `NOT NULL`, unique, or check constraint. Add a nullable column or a default, backfill, then tighten.
+4. Deploy runs `npm run db:migrate:remote` **before** the new Worker. New columns must not break currently deployed code: add first; drop or rename only after code no longer reads the old shape.
+5. D1 has no interactive transactions. Table rebuilds (`CREATE __new_*` → `INSERT` → `DROP` → `RENAME`) lose data if the `SELECT` omits columns or fails mid-way. Prefer `ALTER TABLE ... ADD COLUMN`. Review every rebuild.
+6. Do not run `db:migrate:remote` or any remote D1 write unless the user explicitly asks.
+
+Persisted JSON (`state_json`, `config_json`, and similar) is schema too. New reads must tolerate old blobs until a backfill exists.
+
+## Queries and runtime
+
+- Do not assume empty tables. Unique indexes, `NOT NULL` reads, and writes must work on production rows.
+- Keep the Drizzle adapter in sequential mode. Enabling `transaction: true` breaks every write on D1.
+
+```text
+❌ ADD COLUMN foo TEXT NOT NULL          // existing rows fail; app crashes
+❌ DROP TABLE / recreate to "fix" shape  // destroys live data
+❌ Hand-edit db/auth-schema.ts
+❌ Treat db:reset as something production can do
+
+✅ ADD COLUMN foo TEXT with a default, or nullable + backfill
+✅ Read generated drizzle/*.sql; fix INSERT lists on table rebuilds
+✅ Expand schema → deploy code that tolerates both shapes → contract later
+```
