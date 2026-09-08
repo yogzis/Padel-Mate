@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { copy } from '../copy';
 import { GoHomeButton } from './go-home-button';
 
 export function InviteDecision({ token, inviterName }: { token: string; inviterName: string }) {
@@ -18,10 +19,10 @@ export function InviteDecision({ token, inviterName }: { token: string; inviterN
         body: JSON.stringify({ action, token }),
       });
       const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? 'That invite could not be updated.');
+      if (!response.ok) throw new Error(payload.error ?? copy.errors.inviteCouldNotUpdate);
       setOutcome(action === 'accept-invite' ? 'accepted' : 'rejected');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'That invite could not be updated.');
+      setError(caught instanceof Error ? caught.message : copy.errors.inviteCouldNotUpdate);
     } finally {
       setBusy(false);
     }
@@ -30,9 +31,9 @@ export function InviteDecision({ token, inviterName }: { token: string; inviterN
   if (outcome === 'accepted') {
     return (
       <>
-        <h1>You are now mates</h1>
-        <p>You and {inviterName} can now score matches together.</p>
-        <GoHomeButton href="/?screen=mates">Go to your mates</GoHomeButton>
+        <h1>{copy.invite.nowMatesTitle}</h1>
+        <p>{copy.invite.nowMatesBody(inviterName)}</p>
+        <GoHomeButton href="/?screen=mates">{copy.invite.goToMates}</GoHomeButton>
       </>
     );
   }
@@ -40,8 +41,8 @@ export function InviteDecision({ token, inviterName }: { token: string; inviterN
   if (outcome === 'rejected') {
     return (
       <>
-        <h1>Invite declined</h1>
-        <p>You did not become mates with {inviterName}. This link cannot be used again.</p>
+        <h1>{copy.invite.declinedTitle}</h1>
+        <p>{copy.invite.declinedBody(inviterName)}</p>
         <GoHomeButton />
       </>
     );
@@ -49,15 +50,15 @@ export function InviteDecision({ token, inviterName }: { token: string; inviterN
 
   return (
     <>
-      <h1>{inviterName} invited you</h1>
-      <p>Accept to become mates and score matches together. You can decline if you do not want this connection.</p>
+      <h1>{copy.invite.invitedYou(inviterName)}</h1>
+      <p>{copy.invite.acceptBody}</p>
       {error && <p className="sign-in-error">{error}</p>}
       <div className="invite-actions">
         <button className="primary-button" onClick={() => decide('accept-invite')} disabled={busy}>
-          Accept invite
+          {copy.invite.accept}
         </button>
         <button className="danger-button" onClick={() => decide('reject-invite')} disabled={busy}>
-          Decline
+          {copy.invite.decline}
         </button>
       </div>
     </>

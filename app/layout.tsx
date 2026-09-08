@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { copy } from '../copy';
 import './globals.css';
 
 const geistSans = Geist({
@@ -13,25 +14,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Padel Mate',
-  description: 'Live Padel scoring, activity sessions, and group leaderboards.',
+  title: copy.meta.title,
+  description: copy.meta.description,
   openGraph: {
-    title: 'Padel Mate',
-    description: 'Live Padel scoring, shared activity sessions, and exact four-player group leaderboards.',
+    title: copy.meta.openGraphTitle,
+    description: copy.meta.openGraphDescription,
     type: 'website',
     images: [
       {
         url: '/og.png',
         width: 1536,
         height: 1024,
-        alt: 'Padel Mate live scoreboard',
+        alt: copy.meta.openGraphImageAlt,
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Padel Mate',
-    description: 'Live Padel scoring, shared activity sessions, and exact four-player group leaderboards.',
+    title: copy.meta.twitterTitle,
+    description: copy.meta.twitterDescription,
     images: ['/og.png'],
   },
 };

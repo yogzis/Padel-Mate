@@ -1,10 +1,12 @@
 'use client';
 
+import { copy } from '../copy';
+
 const HOME_PATH = '/';
 
 export function GoHomeButton({
   href = HOME_PATH,
-  children = 'Go to Padel Mate',
+  children = copy.chrome.goHome,
 }: {
   href?: string;
   children?: React.ReactNode;

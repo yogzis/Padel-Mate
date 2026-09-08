@@ -1,4 +1,5 @@
 import { requireActiveUser } from '../../auth-session';
+import { copy } from '../../../copy';
 import {
   acceptMateInvite,
   createMateInvite,
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
         user.userId,
       );
     } else {
-      throw new StoreError(400, 'Unknown request.');
+      throw new StoreError(400, copy.errors.unknownRequest);
     }
 
     return json(data);
@@ -134,7 +135,7 @@ export async function POST(request: Request) {
         data = await leaveActivity(body.activityId, body.deviceId);
         break;
       default:
-        throw new StoreError(400, 'Unknown request.');
+        throw new StoreError(400, copy.errors.unknownRequest);
     }
 
     return json(data);
@@ -145,7 +146,7 @@ export async function POST(request: Request) {
 
 function requiredParam(url: URL, name: string) {
   const value = url.searchParams.get(name);
-  if (!value) throw new StoreError(400, `Missing ${name}.`);
+  if (!value) throw new StoreError(400, copy.errors.missingParam(name));
   return value;
 }
 
@@ -159,5 +160,5 @@ function json(data: unknown, status = 200) {
 function errorResponse(error: unknown) {
   if (error instanceof StoreError) return json({ error: error.message }, error.status);
   console.error(error);
-  return json({ error: 'Something went wrong while saving. Please try again.' }, 500);
+  return json({ error: copy.errors.saveFailed }, 500);
 }

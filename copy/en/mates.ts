@@ -1,0 +1,15 @@
+export const mates = {
+  eyebrow: 'My padel mates',
+  title: 'People you can score with',
+  intro: 'Share a single-use invite link. There is no directory to search.',
+  inviteLinkLabel: 'Invite link',
+  showCurrentInvite: 'Show current invite link',
+  createNewInvite: 'Create new invite',
+  deleteInviteAria: 'Delete invite link',
+  expiresIn: (countdown: string) => `Expires in ${countdown}`,
+  createInviteLink: 'Create invite link',
+  listTitle: 'Mates',
+  empty: 'No mates yet. Share an invite link to add someone.',
+  canJoinGroups: 'Can join your scoring groups',
+  remove: 'Remove',
+};

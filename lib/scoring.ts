@@ -6,6 +6,7 @@ import type {
   PointScore,
   TeamId,
 } from './domain';
+import { copy } from '../copy';
 
 const NEXT_SCORE: Record<Exclude<PointScore, '40' | 'A'>, PointScore> = {
   '0': '15',
@@ -28,7 +29,7 @@ export function awardPoint(
   deuceRule: DeuceRule,
 ): LiveActivityState {
   if (state.phase !== 'live' || state.pendingGameWinner || state.pendingSetWinner) {
-    throw new Error('Scoring is unavailable until the current step is resolved.');
+    throw new Error(copy.errors.scoringUnavailable);
   }
 
   const previous = snapshot(state);
@@ -76,7 +77,7 @@ export function awardPoint(
 
 export function undoPoint(state: LiveActivityState): LiveActivityState {
   const previous = state.history.at(-1);
-  if (!previous) throw new Error('There is no score change to undo.');
+  if (!previous) throw new Error(copy.errors.noScoreChangeToUndo);
 
   return {
     ...state,
