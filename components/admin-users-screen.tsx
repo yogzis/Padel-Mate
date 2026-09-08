@@ -3,6 +3,7 @@
 import { ArrowLeft, ShieldCheck, ShieldOff } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
+import { copy } from '../copy';
 import type { AdminUserRow } from '../lib/server/admin-users';
 
 type AdminResponse = { users?: AdminUserRow[]; error?: string };
@@ -32,7 +33,7 @@ export default function AdminUsersScreen({
     setPendingUserId(null);
 
     if (!response.ok) {
-      setError(payload.error ?? 'Could not update the account.');
+      setError(payload.error ?? copy.admin.updateFailed);
       return;
     }
     setError(null);
@@ -41,12 +42,12 @@ export default function AdminUsersScreen({
 
   const suspend = (user: AdminUserRow) => {
     const days = window.prompt(
-      `Suspend ${user.email} for how many days?\nLeave blank to suspend until you lift it.`,
+      copy.admin.suspendPrompt(user.email),
       '7',
     );
     if (days === null) return;
 
-    const reason = window.prompt('Reason (optional)') ?? '';
+    const reason = window.prompt(copy.admin.reasonOptional) ?? '';
     void submitChange({ action: 'suspend', userId: user.id, durationDays: days.trim(), reason });
   };
 
@@ -57,11 +58,11 @@ export default function AdminUsersScreen({
   return (
     <div className="app-shell">
       <div className="page-content narrow-page">
-        <Link className="back-button" href="/"><ArrowLeft size={16} /> Back to Padel Mate</Link>
+        <Link className="back-button" href="/"><ArrowLeft size={16} /> {copy.admin.back}</Link>
         <div className="page-heading">
           <div>
-            <span className="eyebrow">Administration</span>
-            <h1>Accounts</h1>
+            <span className="eyebrow">{copy.admin.eyebrow}</span>
+            <h1>{copy.admin.title}</h1>
           </div>
         </div>
 
@@ -79,14 +80,14 @@ export default function AdminUsersScreen({
                 <small>{describeStatus(user)}</small>
               </div>
               {user.id === currentUserId ? (
-                <span className="linked-label"><ShieldCheck size={14} /> You</span>
+                <span className="linked-label"><ShieldCheck size={14} /> {copy.chrome.you}</span>
               ) : user.isSuspended ? (
                 <button
                   className="secondary-button"
                   disabled={pendingUserId === user.id}
                   onClick={() => restore(user)}
                 >
-                  <ShieldCheck size={15} /> Restore
+                  <ShieldCheck size={15} /> {copy.admin.restore}
                 </button>
               ) : (
                 <button
@@ -94,7 +95,7 @@ export default function AdminUsersScreen({
                   disabled={pendingUserId === user.id}
                   onClick={() => suspend(user)}
                 >
-                  <ShieldOff size={15} /> Suspend
+                  <ShieldOff size={15} /> {copy.admin.suspend}
                 </button>
               )}
             </div>
@@ -106,14 +107,14 @@ export default function AdminUsersScreen({
 }
 
 function describeStatus(user: AdminUserRow): string {
-  if (!user.isSuspended) return user.role === 'admin' ? 'Administrator' : 'Active';
+  if (!user.isSuspended) return user.role === 'admin' ? copy.admin.administrator : copy.admin.active;
 
   const until = user.suspendedUntil
-    ? `until ${new Date(user.suspendedUntil).toLocaleDateString()}`
-    : 'until lifted';
+    ? copy.admin.untilDate(new Date(user.suspendedUntil).toLocaleDateString())
+    : copy.admin.untilLifted;
   return user.suspendedReason
-    ? `Suspended ${until} — ${user.suspendedReason}`
-    : `Suspended ${until}`;
+    ? copy.admin.suspendedWithReason(until, user.suspendedReason)
+    : copy.admin.suspended(until);
 }
 
 function initials(name: string): string {

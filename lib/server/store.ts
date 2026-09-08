@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { AppUser } from '../../app/auth-session';
+import { copy } from '../../copy';
 import type {
   ActivityConfig,
   ContextSummary,
@@ -122,19 +123,19 @@ async function listContextsForPlayer(playerId: string): Promise<ContextSummary[]
 export async function selectContext(user: AppUser, slotIdsValue: unknown) {
   const slotIds = Array.isArray(slotIdsValue) ? slotIdsValue.map(String) : [];
   if (slotIds.length !== MATCH_SLOT_COUNT) {
-    throw new StoreError(400, 'Fill all four match slots.');
+    throw new StoreError(400, copy.errors.fillAllSlots);
   }
 
   const playerIds = [...new Set(registeredPlayerIdsOf(slotIds))].sort();
   if (playerIds.length < MIN_REGISTERED_PLAYERS_PER_CONTEXT) {
-    throw new StoreError(400, 'Choose at least two registered players.');
+    throw new StoreError(400, copy.errors.chooseTwoRegistered);
   }
 
   const placeholders = playerIds.map(() => '?').join(',');
   const found = await db().prepare(`SELECT id, name FROM player_profiles WHERE id IN (${placeholders})`)
     .bind(...playerIds).all<{ id: string; name: string }>();
   if (found.results.length !== playerIds.length) {
-    throw new StoreError(400, 'One or more selected players no longer exist.');
+    throw new StoreError(400, copy.errors.playersNoLongerExist);
   }
 
   await assertPlayersFormMateClique(user.userId, playerIds, found.results);
@@ -173,11 +174,11 @@ export async function selectContext(user: AppUser, slotIdsValue: unknown) {
  */
 async function assertPlayersAreMates(userId: string, playerIds: readonly string[]) {
   if (!playerIds.includes(userId)) {
-    throw new StoreError(400, 'You must be one of the players in the match.');
+    throw new StoreError(400, copy.errors.mustBeInMatch);
   }
 
   if (!(await playersAreStillMates(userId, playerIds))) {
-    throw new StoreError(403, 'You can only score matches with your mates.');
+    throw new StoreError(403, copy.errors.onlyScoreWithMates);
   }
 }
 
@@ -187,7 +188,7 @@ async function assertPlayersFormMateClique(
   players: readonly { id: string; name: string }[],
 ) {
   if (!playerIds.includes(userId)) {
-    throw new StoreError(400, 'You must be one of the players in the match.');
+    throw new StoreError(400, copy.errors.mustBeInMatch);
   }
 
   const placeholders = playerIds.map(() => '?').join(',');
@@ -204,11 +205,11 @@ async function assertPlayersFormMateClique(
 
   const names = new Map(players.map((player) => [player.id, player.name]));
   const labelFor = (playerId: string) => (
-    playerId === userId ? 'You' : names.get(playerId) ?? 'Player'
+    playerId === userId ? copy.chrome.you : names.get(playerId) ?? copy.chrome.playerFallback
   );
   throw new StoreError(
     403,
-    `${labelFor(missing[0])} and ${labelFor(missing[1])} need to be mates with each other before you can open this group.`,
+    copy.errors.needToBeMates(labelFor(missing[0]), labelFor(missing[1])),
   );
 }
 
@@ -265,7 +266,7 @@ async function assignActivityNumber(activity: ActivityRow): Promise<number> {
     }
   }
 
-  throw new StoreError(409, 'Could not number this activity. Try starting the set again.');
+  throw new StoreError(409, copy.errors.couldNotNumberActivity);
 }
 
 async function consentStatus(activityId: string, registeredIds: readonly string[]) {
@@ -304,13 +305,13 @@ export async function getContext(contextId: string, viewerPlayerId?: string) {
       (SELECT MAX(a.updated_at) FROM activities a WHERE a.context_id = scoreboard_contexts.id) AS last_played_at
      FROM scoreboard_contexts WHERE id = ?`,
   ).bind(contextId).first<{ id: string; name: string; created_at: string; last_played_at: string | null }>();
-  if (!context) throw new StoreError(404, 'Scoring group not found.');
+  if (!context) throw new StoreError(404, copy.errors.groupNotFound);
 
   if (viewerPlayerId) {
     const member = await db().prepare(
       'SELECT player_id FROM context_players WHERE context_id = ? AND player_id = ?',
     ).bind(contextId, viewerPlayerId).first<{ player_id: string }>();
-    if (!member) throw new StoreError(403, 'This scoring group is not available.');
+    if (!member) throw new StoreError(403, copy.errors.groupNotAvailable);
   }
 
   const [playersResult, leaderboardResult, logsResult, activitiesResult] = await db().batch([
@@ -421,11 +422,11 @@ export async function joinActivity(
   const activity = await db().prepare(
     'SELECT * FROM activities WHERE id = ? OR UPPER(share_code) = UPPER(?)',
   ).bind(ref, ref).first<ActivityRow>();
-  if (!activity) throw new StoreError(404, 'Activity session not found.');
+  if (!activity) throw new StoreError(404, copy.errors.activityNotFound);
 
   const memberIds = await registeredPlayerIdsFor(activity.context_id);
   if (!memberIds.includes(user.userId)) {
-    throw new StoreError(403, 'Only players in this scoring group can accept this activity.');
+    throw new StoreError(403, copy.errors.onlyGroupCanAccept);
   }
   if (activity.status === 'completed') {
     return getActivity(activity.id, deviceId, false, user.userId);
@@ -478,7 +479,7 @@ export async function getActivity(
 
   const activity = await db().prepare('SELECT * FROM activities WHERE id = ?')
     .bind(activityId).first<ActivityRow>();
-  if (!activity) throw new StoreError(404, 'Activity session not found.');
+  if (!activity) throw new StoreError(404, copy.errors.activityNotFound);
 
   const registeredIds = await registeredPlayerIdsFor(activity.context_id);
   const consents = await consentStatus(activityId, registeredIds);
@@ -493,14 +494,14 @@ export async function getActivity(
       viewerUserId && consents.acceptedPlayerIds.includes(viewerUserId),
     );
     if (!result.meta.changes && !acceptedWithoutDevice) {
-      throw new StoreError(403, 'This device is not connected to the activity.');
+      throw new StoreError(403, copy.errors.deviceNotConnected);
     }
   }
 
   await abandonIfExpired(activity);
   const refreshed = await db().prepare('SELECT * FROM activities WHERE id = ?')
     .bind(activityId).first<ActivityRow>();
-  if (!refreshed) throw new StoreError(404, 'Activity session not found.');
+  if (!refreshed) throw new StoreError(404, copy.errors.activityNotFound);
 
   const state = parseJson<LiveActivityState>(refreshed.state_json, EMPTY_LIVE_STATE);
   const [contextData, devicesResult, logsResult, historyResult] = await Promise.all([
@@ -566,22 +567,22 @@ export async function setupSet(
   const deviceId = cleanDeviceId(deviceIdValue);
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
-  if (activity.status !== 'active') throw new StoreError(409, 'This activity is not active.');
+  if (activity.status !== 'active') throw new StoreError(409, copy.errors.activityNotActive);
   const { pendingPlayerIds } = await consentStatus(
     activityId,
     await registeredPlayerIdsFor(activity.context_id),
   );
   if (pendingPlayerIds.length) {
-    throw new StoreError(409, 'Wait until every player in this group has accepted this activity.');
+    throw new StoreError(409, copy.errors.waitForAccepts);
   }
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  if (state.phase !== 'set-setup') throw new StoreError(409, 'Finish the current set before changing teams.');
+  if (state.phase !== 'set-setup') throw new StoreError(409, copy.errors.finishSetBeforeTeams);
   await assignActivityNumber(activity);
 
   const allIds = await matchSlotsFor(activity.context_id);
   const blueIds = Array.isArray(blueIdsValue) ? [...new Set(blueIdsValue.map(String))].sort() : [];
   if (blueIds.length !== 2 || !blueIds.every((id) => allIds.includes(id))) {
-    throw new StoreError(400, 'Choose exactly two players for Blue Team.');
+    throw new StoreError(400, copy.errors.chooseExactlyTwoBlue);
   }
   const redIds = allIds.filter((id) => !blueIds.includes(id));
   const setId = crypto.randomUUID();
@@ -639,7 +640,7 @@ export async function scorePoint(
   const deviceId = cleanDeviceId(deviceIdValue);
   const team = teamValue === 'blue' || teamValue === 'red' ? teamValue : null;
   const mutationId = String(mutationIdValue ?? '');
-  if (!team || !mutationId) throw new StoreError(400, 'Invalid score update.');
+  if (!team || !mutationId) throw new StoreError(400, copy.errors.invalidScoreUpdate);
   const participant = await assertConnected(activityId, deviceId);
   const duplicate = await db().prepare('SELECT id FROM score_events WHERE client_mutation_id = ?')
     .bind(mutationId).first<{ id: string }>();
@@ -647,16 +648,16 @@ export async function scorePoint(
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const activity = await getActivityRow(activityId);
-    if (activity.status !== 'active') throw new StoreError(409, 'This activity is not active.');
+    if (activity.status !== 'active') throw new StoreError(409, copy.errors.activityNotActive);
     const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-    if (!state.activeSetId || !state.currentGameId) throw new StoreError(409, 'Start a set before scoring.');
+    if (!state.activeSetId || !state.currentGameId) throw new StoreError(409, copy.errors.startSetBeforeScoring);
     const config = parseJson<ActivityConfig>(activity.config_json, validateConfig({}));
     const previous = snapshot(state);
     let next: LiveActivityState;
     try {
       next = awardPoint(state, team, config.deuceRule);
     } catch (error) {
-      throw new StoreError(409, error instanceof Error ? error.message : 'Score update is unavailable.');
+      throw new StoreError(409, error instanceof Error ? error.message : copy.errors.scoreUpdateUnavailable);
     }
     const nextVersion = activity.version + 1;
     const now = new Date().toISOString();
@@ -679,7 +680,7 @@ export async function scorePoint(
     ).run();
     return getActivity(activityId, deviceId, false);
   }
-  throw new StoreError(409, 'The score changed on the other device. Please try that point again.');
+  throw new StoreError(409, copy.errors.scoreChangedTryPointAgain);
 }
 
 export async function undoScore(
@@ -718,14 +719,14 @@ async function changeScoreState(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const activity = await getActivityRow(activityId);
     const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-    if (!state.activeSetId || !state.currentGameId) throw new StoreError(409, 'There is no active game.');
-    if (action === 'cancel-game' && !state.pendingGameWinner) throw new StoreError(409, 'There is no game result to cancel.');
+    if (!state.activeSetId || !state.currentGameId) throw new StoreError(409, copy.errors.noActiveGame);
+    if (action === 'cancel-game' && !state.pendingGameWinner) throw new StoreError(409, copy.errors.noGameResultToCancel);
     const previous = snapshot(state);
     let next: LiveActivityState;
     try {
       next = undoPoint(state);
     } catch (error) {
-      throw new StoreError(409, error instanceof Error ? error.message : 'Nothing to undo.');
+      throw new StoreError(409, error instanceof Error ? error.message : copy.errors.nothingToUndo);
     }
     const now = new Date().toISOString();
     const nextVersion = activity.version + 1;
@@ -746,7 +747,7 @@ async function changeScoreState(
     ).run();
     return getActivity(activityId, deviceId, false);
   }
-  throw new StoreError(409, 'The score changed on the other device. Please try again.');
+  throw new StoreError(409, copy.errors.scoreChangedTryAgain);
 }
 
 export async function confirmGame(activityIdValue: unknown, deviceIdValue: unknown) {
@@ -755,7 +756,7 @@ export async function confirmGame(activityIdValue: unknown, deviceIdValue: unkno
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  if (!state.pendingGameWinner || !state.activeSetId) throw new StoreError(409, 'There is no game result to confirm.');
+  if (!state.pendingGameWinner || !state.activeSetId) throw new StoreError(409, copy.errors.noGameResultToConfirm);
   const config = parseJson<ActivityConfig>(activity.config_json, validateConfig({}));
   const blueGames = state.blueGames + (state.pendingGameWinner === 'blue' ? 1 : 0);
   const redGames = state.redGames + (state.pendingGameWinner === 'red' ? 1 : 0);
@@ -790,7 +791,7 @@ export async function cancelSet(activityIdValue: unknown, deviceIdValue: unknown
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  if (!state.pendingSetWinner) throw new StoreError(409, 'There is no set result to cancel.');
+  if (!state.pendingSetWinner) throw new StoreError(409, copy.errors.noSetResultToCancel);
   const next = { ...state, pendingSetWinner: null };
   await db().prepare(
     `UPDATE activities SET state_json = ?, version = version + 1, updated_at = ? WHERE id = ?`,
@@ -804,7 +805,7 @@ export async function confirmSet(activityIdValue: unknown, deviceIdValue: unknow
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  if (!state.pendingSetWinner) throw new StoreError(409, 'There is no set result to confirm.');
+  if (!state.pendingSetWinner) throw new StoreError(409, copy.errors.noSetResultToConfirm);
   await completeSet(activity, state, state.pendingSetWinner, 'normal');
   return getActivity(activityId, deviceId, false);
 }
@@ -819,17 +820,17 @@ export async function concludeManualSet(
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  if (!state.activeSetId) throw new StoreError(409, 'There is no active set.');
+  if (!state.activeSetId) throw new StoreError(409, copy.errors.noActiveSet);
   if (choiceValue === 'calculate') {
     if (state.blueGames === state.redGames) {
-      throw new StoreError(409, 'A tied partial set cannot be calculated. Continue playing or disregard it.');
+      throw new StoreError(409, copy.errors.tiedPartialCannotCalculate);
     }
     const winner: TeamId = state.blueGames > state.redGames ? 'blue' : 'red';
     await completeSet(activity, state, winner, 'manual-partial');
   } else if (choiceValue === 'disregard') {
     await disregardSet(activity, state);
   } else {
-    throw new StoreError(400, 'Choose how to conclude this set.');
+    throw new StoreError(400, copy.errors.chooseHowToConclude);
   }
   return getActivity(activityId, deviceId, false);
 }
@@ -840,7 +841,7 @@ export async function finishActivity(activityIdValue: unknown, deviceIdValue: un
   await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  if (state.phase === 'live') throw new StoreError(409, 'Conclude or disregard the current set before finishing.');
+  if (state.phase === 'live') throw new StoreError(409, copy.errors.concludeBeforeFinishing);
   const next = { ...state, phase: 'ended' as const };
   const now = new Date().toISOString();
   await db().prepare(
@@ -874,7 +875,7 @@ async function completeSet(
   winner: TeamId,
   conclusionType: 'normal' | 'manual-partial',
 ) {
-  if (!state.activeSetId) throw new StoreError(409, 'There is no active set.');
+  if (!state.activeSetId) throw new StoreError(409, copy.errors.noActiveSet);
   const now = new Date().toISOString();
   const claim = await db().prepare(
     `UPDATE sets SET blue_games = ?, red_games = ?, status = 'completed', winner_team = ?,
@@ -944,7 +945,7 @@ async function completeSet(
 }
 
 async function disregardSet(activity: ActivityRow, state: LiveActivityState) {
-  if (!state.activeSetId) throw new StoreError(409, 'There is no active set.');
+  if (!state.activeSetId) throw new StoreError(409, copy.errors.noActiveSet);
   const now = new Date().toISOString();
   const claim = await db().prepare(
     `UPDATE sets SET blue_games = ?, red_games = ?, status = 'completed',
@@ -1073,7 +1074,7 @@ async function assertConnected(activityId: string, deviceId: string) {
     last_seen_at: string;
   }>();
   if (!row || row.slot_status === 'released') {
-    throw new StoreError(403, 'This device is no longer connected. Rejoin the activity to continue.');
+    throw new StoreError(403, copy.errors.deviceNoLongerConnected);
   }
   const reservationExpiry = row.reserved_until
     ? Date.parse(row.reserved_until)
@@ -1082,7 +1083,7 @@ async function assertConnected(activityId: string, deviceId: string) {
     await db().prepare(
       `UPDATE activity_devices SET slot_status = 'released', reserved_until = NULL WHERE activity_id = ? AND device_id = ?`,
     ).bind(activityId, deviceId).run();
-    throw new StoreError(403, 'This device is no longer connected. Rejoin the activity to continue.');
+    throw new StoreError(403, copy.errors.deviceNoLongerConnected);
   }
   await db().prepare(
     `UPDATE activity_devices SET slot_status = 'active', reserved_until = NULL,
@@ -1095,7 +1096,7 @@ async function assertConnected(activityId: string, deviceId: string) {
 async function getActivityRow(activityId: string) {
   const row = await db().prepare('SELECT * FROM activities WHERE id = ?')
     .bind(activityId).first<ActivityRow>();
-  if (!row) throw new StoreError(404, 'Activity session not found.');
+  if (!row) throw new StoreError(404, copy.errors.activityNotFound);
   return row;
 }
 
@@ -1179,7 +1180,7 @@ function parseJson<T>(value: string, fallback: T): T {
 
 function cleanDeviceId(value: unknown) {
   const id = String(value ?? '').trim();
-  if (!id || id.length > 100) throw new StoreError(400, 'This device needs a valid session identity.');
+  if (!id || id.length > 100) throw new StoreError(400, copy.errors.deviceNeedsIdentity);
   return id;
 }
 

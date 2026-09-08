@@ -2,11 +2,12 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ADMIN_ROLE, isAdminEmail } from '../lib/admin-access';
 import { auth } from '../lib/auth';
+import { copy } from '../copy';
 import { StoreError } from '../lib/server/store';
 
 export const SIGN_IN_PATH = '/sign-in';
 
-const SUSPENDED_MESSAGE = 'Your account is suspended. Contact the administrator.';
+const SUSPENDED_MESSAGE = copy.errors.accountSuspendedApi;
 
 /**
  * The shape the app's own code passes around. Deliberately narrower than
@@ -48,14 +49,14 @@ export async function requireAppUser(): Promise<AppUser> {
  */
 export async function requireActiveUser(): Promise<AppUser> {
   const user = await getAppUser();
-  if (!user) throw new StoreError(401, 'Sign in to continue.');
+  if (!user) throw new StoreError(401, copy.errors.signInToContinue);
   if (user.isSuspended) throw new StoreError(403, SUSPENDED_MESSAGE);
   return user;
 }
 
 export async function requireAdminUser(): Promise<AppUser> {
   const user = await requireActiveUser();
-  if (!user.isAdmin) throw new StoreError(403, 'Administrator access required.');
+  if (!user.isAdmin) throw new StoreError(403, copy.errors.administratorRequired);
   return user;
 }
 

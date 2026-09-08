@@ -2,6 +2,7 @@
 
 import { ShieldOff } from 'lucide-react';
 import { useState } from 'react';
+import { copy } from '../copy';
 import { authClient } from '../lib/auth-client';
 
 const BANNED_ERROR_CODE = 'banned_user';
@@ -33,7 +34,7 @@ export default function SignInScreen({
 
     if (signInError) {
       setIsRedirecting(false);
-      setError(signInError.message ?? 'Could not start sign-in. Please try again.');
+      setError(signInError.message ?? copy.signIn.startFailed);
     }
   };
 
@@ -43,21 +44,21 @@ export default function SignInScreen({
         {isSuspended ? (
           <>
             <span className="brand-mark"><ShieldOff size={18} /></span>
-            <h1>Account suspended</h1>
+            <h1>{copy.signIn.suspendedTitle}</h1>
           </>
         ) : (
           <>
             <img className="sign-in-logo" src="/padel-mate-logo.png" alt="" />
-            <h1 className="visually-hidden">Padel Mate</h1>
+            <h1 className="visually-hidden">{copy.chrome.appName}</h1>
           </>
         )}
         <p>
           {isSuspended
-            ? 'Your account is currently suspended. Contact the administrator if you think this is a mistake.'
-            : 'Live scoring, shared activity sessions, and group leaderboards.'}
+            ? copy.signIn.suspendedBody
+            : copy.signIn.tagline}
         </p>
         <button className="primary-button" onClick={signInWithGoogle} disabled={isRedirecting}>
-          {isRedirecting ? 'Redirecting…' : 'Continue with Google'}
+          {isRedirecting ? copy.signIn.redirecting : copy.signIn.continueWithGoogle}
         </button>
         {error && !isSuspended && <p className="sign-in-error" role="alert">{error}</p>}
       </div>
@@ -68,5 +69,5 @@ export default function SignInScreen({
 function messageForErrorCode(errorCode?: string): string | null {
   if (!errorCode) return null;
   if (errorCode.toLowerCase() === BANNED_ERROR_CODE) return null;
-  return 'Sign-in did not complete. Please try again.';
+  return copy.signIn.didNotComplete;
 }

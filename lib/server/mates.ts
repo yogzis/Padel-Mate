@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { copy } from '../../copy';
 import { MATE_INVITE_LIFETIME_MS, type Mate, type MateInviteLink } from '../domain';
 import { remainingMateInviteMs } from '../mate-invite';
 import { mateCircleFromEdges, type MateCircle } from '../mate-circle';
@@ -47,24 +48,24 @@ type OpenInvite = InviteRow & { inviter: Mate };
 
 async function loadOpenInvite(playerId: string, tokenValue: unknown): Promise<OpenInvite> {
   const token = String(tokenValue ?? '').trim();
-  if (!token) throw new StoreError(400, 'That invite link is not valid.');
+  if (!token) throw new StoreError(400, copy.errors.inviteNotValid);
 
   const invite = await db().prepare(
     'SELECT token, created_by_player_id, expires_at, consumed_at, created_at FROM mate_invites WHERE token = ?',
   ).bind(token).first<InviteRow>();
 
-  if (!invite) throw new StoreError(404, 'That invite link is not valid.');
-  if (invite.consumed_at) throw new StoreError(409, 'That invite link has already been used.');
+  if (!invite) throw new StoreError(404, copy.errors.inviteNotValid);
+  if (invite.consumed_at) throw new StoreError(409, copy.errors.inviteAlreadyUsed);
   if (remainingMateInviteMs(invite.created_at) <= 0) {
-    throw new StoreError(410, 'That invite link has expired. Ask for a new one.');
+    throw new StoreError(410, copy.errors.inviteExpired);
   }
 
   const inviterId = invite.created_by_player_id;
-  if (inviterId === playerId) throw new StoreError(400, 'You cannot invite yourself.');
+  if (inviterId === playerId) throw new StoreError(400, copy.errors.cannotInviteSelf);
 
   const inviter = await db().prepare('SELECT id, name, created_at FROM player_profiles WHERE id = ?')
     .bind(inviterId).first<{ id: string; name: string; created_at: string }>();
-  if (!inviter) throw new StoreError(404, 'The player who sent this invite no longer exists.');
+  if (!inviter) throw new StoreError(404, copy.errors.inviterGone);
 
   return {
     ...invite,
@@ -96,7 +97,7 @@ export async function acceptMateInvite(playerId: string, tokenValue: unknown): P
       .bind(invite.inviter.id, playerId, now),
   ]);
 
-  if (!claim.meta.changes) throw new StoreError(409, 'That invite link has already been used.');
+  if (!claim.meta.changes) throw new StoreError(409, copy.errors.inviteAlreadyUsed);
 
   return { mate: invite.inviter };
 }
@@ -108,7 +109,7 @@ export async function rejectMateInvite(playerId: string, tokenValue: unknown): P
     'UPDATE mate_invites SET consumed_at = ?, consumed_by_player_id = ? WHERE token = ? AND consumed_at IS NULL',
   ).bind(now, playerId, invite.token).run();
 
-  if (!claim.meta.changes) throw new StoreError(409, 'That invite link has already been used.');
+  if (!claim.meta.changes) throw new StoreError(409, copy.errors.inviteAlreadyUsed);
   return { ok: true };
 }
 
@@ -135,7 +136,7 @@ export async function deleteOpenMateInvite(playerId: string): Promise<{ ok: true
   ).bind(playerId).run();
 
   if (!result.meta.changes) {
-    throw new StoreError(409, 'That invite link has already been used or is no longer available.');
+    throw new StoreError(409, copy.errors.inviteAlreadyUsedOrUnavailable);
   }
   return { ok: true };
 }
@@ -168,13 +169,13 @@ export async function listMateCircle(playerId: string, mateIds: readonly string[
 
 export async function removeMate(playerId: string, matePlayerIdValue: unknown): Promise<{ ok: true }> {
   const matePlayerId = String(matePlayerIdValue ?? '');
-  if (!matePlayerId) throw new StoreError(400, 'Choose a mate to remove.');
+  if (!matePlayerId) throw new StoreError(400, copy.errors.chooseMateToRemove);
 
   const [removal] = await db().batch([
     db().prepare('DELETE FROM mates WHERE player_id = ? AND mate_player_id = ?').bind(playerId, matePlayerId),
     db().prepare('DELETE FROM mates WHERE player_id = ? AND mate_player_id = ?').bind(matePlayerId, playerId),
   ]);
 
-  if (!removal.meta.changes) throw new StoreError(404, 'That player is not one of your mates.');
+  if (!removal.meta.changes) throw new StoreError(404, copy.errors.notOneOfYourMates);
   return { ok: true };
 }

@@ -659,6 +659,8 @@ flowchart LR
   AS --> L
 ```
 
+Screen copy is read from `copy/` (English nested catalog). Components do not own user-facing sentences.
+
 ## 8.1 Live Scoreboard Responsive Layout
 
 ```mermaid

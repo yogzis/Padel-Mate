@@ -98,6 +98,7 @@
 ## 2. Engineering Checklist
 
 - [x] Domain types are explicitly defined.
+- [x] User-facing sentences live in `copy/en/`, not in JSX or throws.
 - [x] A player shares its identifier with the user account, while devices stay separate.
 - [x] The player record survives account removal so history keeps its names.
 - [x] Guest slot identifiers cannot collide with a real user id.
@@ -283,6 +284,7 @@
 - [x] On phones, Groups and Mates are available from the header menu.
 - [x] The signed-in header shows the Padel Mate wordmark logo.
 - [x] App chrome uses the logo navy and royal blue tokens. The live scoreboard stays dark olive with Blue and Red teams.
+- [x] Static UI copy is edited in `copy/en/`, not inside components.
 - [x] Chrome focus rings, control borders, and Red Team score text meet WCAG 2.2 AA contrast.
 - [ ] Confirmation dialogs clearly state the consequence.
 - [ ] The activity configuration screen explains each option.

@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { copy } from '../../../copy';
 import { GoHomeButton } from '../../../components/go-home-button';
 import { InviteDecision } from '../../../components/invite-decision';
 import { StoreError } from '../../../lib/server/errors';
@@ -22,7 +23,7 @@ async function loadInvitePreview(playerId: string, token: string): Promise<Invit
       ok: false,
       message: error instanceof StoreError
         ? error.message
-        : 'Something went wrong opening this invite.',
+        : copy.errors.inviteOpenFailed,
     };
   }
 }
@@ -44,7 +45,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           <InviteDecision token={token} inviterName={preview.inviterName} />
         ) : (
           <>
-            <h1>Invite not available</h1>
+            <h1>{copy.invite.notAvailable}</h1>
             <p>{preview.message}</p>
             <GoHomeButton />
           </>

@@ -14,6 +14,7 @@ Activity sessions must support up to 2 connected devices. Updates accepted by th
 
 ```text
 UI Components
+  -> Copy Catalog
   -> Application State
     -> Domain Services
       -> Auth Service
@@ -86,6 +87,16 @@ Responsible for:
 - Rendering the same wordmark on the sign-in card. The heading stays available to assistive tech.
 
 The UI layer should not contain scoring rule complexity.
+
+User-facing sentences live in the copy catalog, not in JSX or `StoreError` throws.
+
+### Copy Catalog
+
+English UI copy, metadata, toasts, and product error messages live in `copy/`. Screens and server modules import `copy` from `copy/index.ts`. `Copy` is the type of the English catalog, so a later Hebrew file can match that shape without changing components.
+
+Section files under `copy/en/` are grouped by screen (`groups`, `mates`, `live`, `errors`, and so on). Interpolated lines are functions, not concatenated fragments. There is no i18n runtime and no locale switch yet. Adding Hebrew later is a second values file plus `lang`/`dir` on the document, not a rewrite of the screens.
+
+The catalog does not hold loaded data (player names, scores, dates) or developer-only throws such as a missing database binding.
 
 ### Auth Service
 
