@@ -14,6 +14,14 @@ import type {
 } from '../domain';
 import { EMPTY_LIVE_STATE } from '../domain';
 import {
+  activityIsPaused,
+  closeOwnedOutcome,
+  controllersOf,
+  exclusiveReleaseKind,
+  normalizeControllerIds,
+  stripController,
+} from '../activity-roles';
+import {
   MATCH_SLOT_COUNT,
   MIN_REGISTERED_PLAYERS_PER_CONTEXT,
   contextKeyFor,
@@ -51,6 +59,7 @@ type ActivityRow = {
   state_json: string;
   version: number;
   created_by_user_id: string;
+  controller_user_ids_json: string | null;
   started_at: string;
   updated_at: string;
   abandoned_at: string | null;
@@ -279,6 +288,184 @@ async function consentStatus(activityId: string, registeredIds: readonly string[
   };
 }
 
+function controllerIdsOf(activity: ActivityRow): string[] {
+  return controllersOf(activity.controller_user_ids_json, activity.created_by_user_id);
+}
+
+async function namesForPlayers(playerIds: readonly string[]): Promise<string> {
+  if (playerIds.length === 0) return '';
+  const placeholders = playerIds.map(() => '?').join(',');
+  const rows = await db().prepare(
+    `SELECT id, name FROM player_profiles WHERE id IN (${placeholders})`,
+  ).bind(...playerIds).all<{ id: string; name: string }>();
+  const byId = new Map(rows.results.map((row) => [row.id, row.name]));
+  const names = playerIds.map((id) => byId.get(id) ?? copy.chrome.playerFallback);
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
+async function ownerNameOf(ownerUserId: string): Promise<string> {
+  const row = await db().prepare('SELECT name FROM player_profiles WHERE id = ?')
+    .bind(ownerUserId).first<{ name: string }>();
+  return row?.name ?? copy.chrome.playerFallback;
+}
+
+async function assertOwner(activity: ActivityRow, userId: string) {
+  if (activity.created_by_user_id !== userId) {
+    throw new StoreError(403, copy.errors.onlyOwnerCanManageActivity);
+  }
+}
+
+async function assertController(activity: ActivityRow, userId: string) {
+  if (!controllerIdsOf(activity).includes(userId)) {
+    throw new StoreError(403, copy.errors.onlyControllersCanScore);
+  }
+}
+
+async function assertEveryoneIn(activityId: string, contextId: string) {
+  const { pendingPlayerIds } = await consentStatus(activityId, await registeredPlayerIdsFor(contextId));
+  if (!activityIsPaused(pendingPlayerIds)) return;
+  const names = await namesForPlayers(pendingPlayerIds);
+  throw new StoreError(409, copy.errors.activityPausedUntilRejoin(names));
+}
+
+async function writeControllers(activityId: string, controllerUserIds: readonly string[]) {
+  await db().prepare(
+    `UPDATE activities SET controller_user_ids_json = ?, version = version + 1, updated_at = ?
+     WHERE id = ?`,
+  ).bind(JSON.stringify(controllerUserIds), new Date().toISOString(), activityId).run();
+}
+
+async function deviceLabelFor(activityId: string, deviceId: string, user: AppUser) {
+  const row = await db().prepare(
+    'SELECT device_label FROM activity_devices WHERE activity_id = ? AND device_id = ?',
+  ).bind(activityId, deviceId).first<{ device_label: string }>();
+  return row?.device_label ?? deviceLabel(user.displayName);
+}
+
+async function ensureDevicePresence(
+  activity: ActivityRow,
+  user: AppUser,
+  deviceId: string,
+) {
+  const now = new Date().toISOString();
+  const existing = await db().prepare(
+    'SELECT id FROM activity_devices WHERE activity_id = ? AND device_id = ?',
+  ).bind(activity.id, deviceId).first<{ id: string }>();
+  if (existing) {
+    await db().prepare(
+      `UPDATE activity_devices SET user_id = ?, user_display_name = ?, slot_status = 'active',
+       reserved_until = NULL, last_seen_at = ?, left_at = NULL WHERE id = ?`,
+    ).bind(user.userId, user.displayName, now, existing.id).run();
+    return;
+  }
+
+  const sameUser = await db().prepare(
+    `SELECT COUNT(*) AS count FROM activity_devices
+     WHERE activity_id = ? AND user_id = ? AND slot_status != 'released'`,
+  ).bind(activity.id, user.userId).first<{ count: number }>();
+  const suffix = Number(sameUser?.count ?? 0) + 1;
+  const label = deviceLabel(user.displayName, suffix > 1 ? suffix : undefined);
+  const role = activity.created_by_user_id === user.userId ? 'host' : 'participant';
+  await db().prepare(
+    `INSERT INTO activity_devices
+      (id, activity_id, device_id, user_id, user_display_name, device_label, role,
+       slot_status, reserved_until, joined_at, last_seen_at, left_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL)`,
+  ).bind(
+    crypto.randomUUID(), activity.id, deviceId, user.userId, user.displayName, label, role, now, now,
+  ).run();
+}
+
+async function finishActivityRecord(activity: ActivityRow) {
+  const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
+  const next = { ...state, phase: 'ended' as const };
+  const now = new Date().toISOString();
+  await db().prepare(
+    `UPDATE activities SET status = 'completed', state_json = ?, version = version + 1,
+     updated_at = ?, ended_at = ? WHERE id = ? AND status = 'active'`,
+  ).bind(JSON.stringify(next), now, now, activity.id).run();
+}
+
+async function abandonActivityNow(activity: ActivityRow) {
+  if (activity.status !== 'active') return;
+  const now = new Date().toISOString();
+  const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
+  const statements: D1PreparedStatement[] = [
+    db().prepare(
+      `UPDATE activities SET status = 'abandoned', abandoned_at = ?, updated_at = ?,
+       version = version + 1 WHERE id = ? AND status = 'active'`,
+    ).bind(now, now, activity.id),
+  ];
+  if (state.activeSetId) {
+    const activityNumber = await assignActivityNumber(activity);
+    statements.push(db().prepare(
+      `INSERT OR IGNORE INTO set_logs
+        (id, context_id, activity_id, activity_number, activity_date, set_id, set_number,
+         blue_player_ids_json, red_player_ids_json, blue_games, red_games, winner_team,
+         conclusion_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'abandoned', ?)`,
+    ).bind(
+      `abandoned-${activity.id}`, activity.context_id, activity.id, activityNumber,
+      activity.started_at, state.activeSetId, state.setNumber,
+      JSON.stringify(state.bluePlayerIds), JSON.stringify(state.redPlayerIds),
+      state.blueGames, state.redGames, now,
+    ));
+  }
+  await db().batch(statements);
+}
+
+async function closeOwnedActivity(activity: ActivityRow) {
+  const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
+  if (closeOwnedOutcome(state.phase) === 'abandon') {
+    await abandonActivityNow(activity);
+    return;
+  }
+  await finishActivityRecord(activity);
+}
+
+async function leaveAsParticipant(activity: ActivityRow, userId: string, deviceId: string) {
+  const now = new Date().toISOString();
+  await db().batch([
+    db().prepare(
+      'DELETE FROM activity_consents WHERE activity_id = ? AND player_id = ?',
+    ).bind(activity.id, userId),
+    db().prepare(
+      `UPDATE activity_devices SET slot_status = 'released', reserved_until = NULL,
+       left_at = ?, last_seen_at = ? WHERE activity_id = ? AND (device_id = ? OR user_id = ?)`,
+    ).bind(now, now, activity.id, deviceId, userId),
+  ]);
+  const nextControllers = stripController(controllerIdsOf(activity), userId, activity.created_by_user_id);
+  await writeControllers(activity.id, nextControllers);
+  const occupied = await countOccupiedSlots(activity.id);
+  if (occupied === 0) {
+    await db().prepare(
+      `UPDATE activities SET all_devices_disconnected_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'active'`,
+    ).bind(now, now, activity.id).run();
+  }
+}
+
+async function releaseOtherActivities(user: AppUser, exceptActivityId?: string) {
+  const rows = await db().prepare(
+    `SELECT DISTINCT a.id, a.created_by_user_id FROM activities a
+     LEFT JOIN activity_consents c ON c.activity_id = a.id AND c.player_id = ?
+     WHERE a.status = 'active' AND (a.created_by_user_id = ? OR c.player_id IS NOT NULL)`,
+  ).bind(user.userId, user.userId).all<{ id: string; created_by_user_id: string }>();
+
+  for (const row of rows.results) {
+    if (row.id === exceptActivityId) continue;
+    const activity = await getActivityRow(row.id);
+    if (exclusiveReleaseKind(activity.created_by_user_id === user.userId) === 'close-owned') {
+      await closeOwnedActivity(activity);
+      continue;
+    }
+    await leaveAsParticipant(activity, user.userId, '');
+  }
+}
+
+
 async function attachViewerAcceptance<T extends { id: string }>(
   activities: T[],
   viewerPlayerId?: string,
@@ -337,8 +524,12 @@ export async function getContext(contextId: string, viewerPlayerId?: string) {
        ORDER BY activity_date DESC, set_number DESC`,
     ).bind(contextId, contextId),
     db().prepare(
-      `SELECT id, activity_number, status, started_at, updated_at, share_code
-       FROM activities WHERE context_id = ? ORDER BY started_at DESC LIMIT 5`,
+      `SELECT a.id, a.activity_number, a.status, a.started_at, a.updated_at, a.share_code,
+        a.created_by_user_id, p.name AS owner_name
+       FROM activities a
+       JOIN player_profiles p ON p.id = a.created_by_user_id
+       WHERE a.context_id = ? AND a.status IN ('active', 'abandoned')
+       ORDER BY a.started_at DESC`,
     ).bind(contextId),
   ]);
 
@@ -361,6 +552,8 @@ export async function getContext(contextId: string, viewerPlayerId?: string) {
         startedAt: String(row.started_at),
         updatedAt: String(row.updated_at),
         shareCode: String(row.share_code),
+        ownerUserId: String(row.created_by_user_id),
+        ownerName: String(row.owner_name),
       })),
       viewerPlayerId,
     ),
@@ -385,6 +578,7 @@ export async function createActivity(
   await getContext(contextId, user.userId);
   const playerIds = await registeredPlayerIdsFor(contextId);
   await assertPlayersAreMates(user.userId, playerIds);
+  await releaseOtherActivities(user);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -396,9 +590,12 @@ export async function createActivity(
     db().prepare(
       `INSERT INTO activities
         (id, context_id, status, config_json, share_code, state_json,
-         version, created_by_user_id, started_at, updated_at)
-       VALUES (?, ?, 'active', ?, ?, ?, 0, ?, ?, ?)`,
-    ).bind(id, contextId, JSON.stringify(config), shareCode, JSON.stringify(state), user.userId, now, now),
+         version, created_by_user_id, controller_user_ids_json, started_at, updated_at)
+       VALUES (?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?)`,
+    ).bind(
+      id, contextId, JSON.stringify(config), shareCode, JSON.stringify(state),
+      user.userId, JSON.stringify([user.userId]), now, now,
+    ),
     db().prepare(
       `INSERT INTO activity_devices
         (id, activity_id, device_id, user_id, user_display_name, device_label, role,
@@ -432,39 +629,13 @@ export async function joinActivity(
     return getActivity(activity.id, deviceId, false, user.userId);
   }
 
-  await recordConsent(activity.id, user.userId);
-
-  await refreshDeviceSlots(activity.id);
-  const existing = await db().prepare(
-    'SELECT id, slot_status FROM activity_devices WHERE activity_id = ? AND device_id = ?',
-  ).bind(activity.id, deviceId).first<{ id: string; slot_status: string }>();
-  const now = new Date().toISOString();
-  if (existing) {
-    if (existing.slot_status === 'released' && await countOccupiedSlots(activity.id) >= 2) {
-      return getActivity(activity.id, deviceId, false, user.userId);
-    }
-    await db().prepare(
-      `UPDATE activity_devices SET user_id = ?, user_display_name = ?, slot_status = 'active',
-       reserved_until = NULL, last_seen_at = ?, left_at = NULL WHERE id = ?`,
-    ).bind(user.userId, user.displayName, now, existing.id).run();
-    return getActivity(activity.id, deviceId, false, user.userId);
+  if (activity.status === 'active') {
+    await releaseOtherActivities(user, activity.id);
   }
 
-  const occupied = await countOccupiedSlots(activity.id);
-  if (occupied >= 2) return getActivity(activity.id, deviceId, false, user.userId);
-
-  const sameUser = await db().prepare(
-    `SELECT COUNT(*) AS count FROM activity_devices
-     WHERE activity_id = ? AND user_id = ? AND slot_status != 'released'`,
-  ).bind(activity.id, user.userId).first<{ count: number }>();
-  const suffix = Number(sameUser?.count ?? 0) + 1;
-  const label = deviceLabel(user.displayName, suffix > 1 ? suffix : undefined);
-  await db().prepare(
-    `INSERT INTO activity_devices
-      (id, activity_id, device_id, user_id, user_display_name, device_label, role,
-       slot_status, reserved_until, joined_at, last_seen_at, left_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'participant', 'active', NULL, ?, ?, NULL)`,
-  ).bind(crypto.randomUUID(), activity.id, deviceId, user.userId, user.displayName, label, now, now).run();
+  await recordConsent(activity.id, user.userId);
+  await refreshDeviceSlots(activity.id);
+  await ensureDevicePresence(activity, user, deviceId);
   return getActivity(activity.id, deviceId, false, user.userId);
 }
 
@@ -504,7 +675,8 @@ export async function getActivity(
   if (!refreshed) throw new StoreError(404, copy.errors.activityNotFound);
 
   const state = parseJson<LiveActivityState>(refreshed.state_json, EMPTY_LIVE_STATE);
-  const [contextData, devicesResult, logsResult, historyResult] = await Promise.all([
+  const controllerUserIds = controllerIdsOf(refreshed);
+  const [contextData, devicesResult, logsResult, historyResult, ownerName] = await Promise.all([
     getContext(refreshed.context_id),
     db().prepare(
       `SELECT device_id, device_label, role, slot_status, last_seen_at, reserved_until
@@ -524,6 +696,7 @@ export async function getActivity(
          FROM score_events WHERE current_game_id = ? ORDER BY sequence_number DESC LIMIT 50`,
       ).bind(state.currentGameId).all<Record<string, unknown>>()
       : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+    ownerNameOf(refreshed.created_by_user_id),
   ]);
 
   return {
@@ -554,6 +727,11 @@ export async function getActivity(
     history: historyResult.results.map(mapScoreEvent).reverse(),
     acceptedPlayerIds: consents.acceptedPlayerIds,
     pendingPlayerIds: consents.pendingPlayerIds,
+    ownerUserId: refreshed.created_by_user_id,
+    ownerName,
+    controllerUserIds,
+    viewerIsOwner: viewerUserId === refreshed.created_by_user_id,
+    viewerIsController: Boolean(viewerUserId && controllerUserIds.includes(viewerUserId)),
   };
 }
 
@@ -565,8 +743,8 @@ export async function setupSet(
 ) {
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
-  await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
   if (activity.status !== 'active') throw new StoreError(409, copy.errors.activityNotActive);
   const { pendingPlayerIds } = await consentStatus(
     activityId,
@@ -608,7 +786,7 @@ export async function setupSet(
       `UPDATE activities SET state_json = ?, version = version + 1, updated_at = ? WHERE id = ?`,
     ).bind(JSON.stringify(next), now, activityId),
   ]);
-  return getActivity(activityId, deviceId, false);
+  return getActivity(activityId, deviceId, false, user.userId);
 }
 
 /**
@@ -641,10 +819,13 @@ export async function scorePoint(
   const team = teamValue === 'blue' || teamValue === 'red' ? teamValue : null;
   const mutationId = String(mutationIdValue ?? '');
   if (!team || !mutationId) throw new StoreError(400, copy.errors.invalidScoreUpdate);
-  const participant = await assertConnected(activityId, deviceId);
+  const activityGuard = await getActivityRow(activityId);
+  await assertController(activityGuard, user.userId);
+  await assertEveryoneIn(activityId, activityGuard.context_id);
+  const participantLabel = await deviceLabelFor(activityId, deviceId, user);
   const duplicate = await db().prepare('SELECT id FROM score_events WHERE client_mutation_id = ?')
     .bind(mutationId).first<{ id: string }>();
-  if (duplicate) return getActivity(activityId, deviceId, false);
+  if (duplicate) return getActivity(activityId, deviceId, false, user.userId);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const activity = await getActivityRow(activityId);
@@ -676,9 +857,9 @@ export async function scorePoint(
     ).bind(
       crypto.randomUUID(), mutationId, activityId, state.activeSetId, state.currentGameId,
       nextVersion, team, JSON.stringify(previous), JSON.stringify(snapshot(next)), deviceId,
-      user.userId, user.displayName, participant.device_label, now,
+      user.userId, user.displayName, participantLabel, now,
     ).run();
-    return getActivity(activityId, deviceId, false);
+    return getActivity(activityId, deviceId, false, user.userId);
   }
   throw new StoreError(409, copy.errors.scoreChangedTryPointAgain);
 }
@@ -711,10 +892,13 @@ async function changeScoreState(
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
   const mutationId = String(mutationIdValue ?? crypto.randomUUID());
-  const participant = await assertConnected(activityId, deviceId);
+  const activityGuard = await getActivityRow(activityId);
+  await assertOwner(activityGuard, user.userId);
+  await assertEveryoneIn(activityId, activityGuard.context_id);
+  const participantLabel = await deviceLabelFor(activityId, deviceId, user);
   const duplicate = await db().prepare('SELECT id FROM score_events WHERE client_mutation_id = ?')
     .bind(mutationId).first<{ id: string }>();
-  if (duplicate) return getActivity(activityId, deviceId, false);
+  if (duplicate) return getActivity(activityId, deviceId, false, user.userId);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const activity = await getActivityRow(activityId);
@@ -743,18 +927,23 @@ async function changeScoreState(
     ).bind(
       crypto.randomUUID(), mutationId, activityId, state.activeSetId, state.currentGameId,
       nextVersion, action, JSON.stringify(previous), JSON.stringify(snapshot(next)), deviceId,
-      user.userId, user.displayName, participant.device_label, now,
+      user.userId, user.displayName, participantLabel, now,
     ).run();
-    return getActivity(activityId, deviceId, false);
+    return getActivity(activityId, deviceId, false, user.userId);
   }
   throw new StoreError(409, copy.errors.scoreChangedTryAgain);
 }
 
-export async function confirmGame(activityIdValue: unknown, deviceIdValue: unknown) {
+export async function confirmGame(
+  user: AppUser,
+  activityIdValue: unknown,
+  deviceIdValue: unknown,
+) {
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
-  await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
+  await assertEveryoneIn(activityId, activity.context_id);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
   if (!state.pendingGameWinner || !state.activeSetId) throw new StoreError(409, copy.errors.noGameResultToConfirm);
   const config = parseJson<ActivityConfig>(activity.config_json, validateConfig({}));
@@ -782,43 +971,54 @@ export async function confirmGame(activityIdValue: unknown, deviceIdValue: unkno
       `UPDATE activities SET state_json = ?, version = version + 1, updated_at = ? WHERE id = ?`,
     ).bind(JSON.stringify(next), now, activityId),
   ]);
-  return getActivity(activityId, deviceId, false);
+  return getActivity(activityId, deviceId, false, user.userId);
 }
 
-export async function cancelSet(activityIdValue: unknown, deviceIdValue: unknown) {
+export async function cancelSet(
+  user: AppUser,
+  activityIdValue: unknown,
+  deviceIdValue: unknown,
+) {
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
-  await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
   if (!state.pendingSetWinner) throw new StoreError(409, copy.errors.noSetResultToCancel);
   const next = { ...state, pendingSetWinner: null };
   await db().prepare(
     `UPDATE activities SET state_json = ?, version = version + 1, updated_at = ? WHERE id = ?`,
   ).bind(JSON.stringify(next), new Date().toISOString(), activityId).run();
-  return getActivity(activityId, deviceId, false);
+  return getActivity(activityId, deviceId, false, user.userId);
 }
 
-export async function confirmSet(activityIdValue: unknown, deviceIdValue: unknown) {
+export async function confirmSet(
+  user: AppUser,
+  activityIdValue: unknown,
+  deviceIdValue: unknown,
+) {
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
-  await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
+  await assertEveryoneIn(activityId, activity.context_id);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
   if (!state.pendingSetWinner) throw new StoreError(409, copy.errors.noSetResultToConfirm);
   await completeSet(activity, state, state.pendingSetWinner, 'normal');
-  return getActivity(activityId, deviceId, false);
+  return getActivity(activityId, deviceId, false, user.userId);
 }
 
 export async function concludeManualSet(
+  user: AppUser,
   activityIdValue: unknown,
   deviceIdValue: unknown,
   choiceValue: unknown,
 ) {
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
-  await assertConnected(activityId, deviceId);
   const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
+  await assertEveryoneIn(activityId, activity.context_id);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
   if (!state.activeSetId) throw new StoreError(409, copy.errors.noActiveSet);
   if (choiceValue === 'calculate') {
@@ -832,41 +1032,71 @@ export async function concludeManualSet(
   } else {
     throw new StoreError(400, copy.errors.chooseHowToConclude);
   }
-  return getActivity(activityId, deviceId, false);
+  return getActivity(activityId, deviceId, false, user.userId);
 }
 
-export async function finishActivity(activityIdValue: unknown, deviceIdValue: unknown) {
+export async function finishActivity(
+  user: AppUser,
+  activityIdValue: unknown,
+  deviceIdValue: unknown,
+) {
   const activityId = String(activityIdValue ?? '');
-  const deviceId = cleanDeviceId(deviceIdValue);
-  await assertConnected(activityId, deviceId);
+  cleanDeviceId(deviceIdValue);
   const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
   const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
   if (state.phase === 'live') throw new StoreError(409, copy.errors.concludeBeforeFinishing);
-  const next = { ...state, phase: 'ended' as const };
-  const now = new Date().toISOString();
-  await db().prepare(
-    `UPDATE activities SET status = 'completed', state_json = ?, version = version + 1,
-     updated_at = ?, ended_at = ? WHERE id = ?`,
-  ).bind(JSON.stringify(next), now, now, activityId).run();
+  await finishActivityRecord(activity);
   return { ok: true };
 }
 
-export async function leaveActivity(activityIdValue: unknown, deviceIdValue: unknown) {
+export async function leaveActivity(
+  user: AppUser,
+  activityIdValue: unknown,
+  deviceIdValue: unknown,
+) {
   const activityId = String(activityIdValue ?? '');
   const deviceId = cleanDeviceId(deviceIdValue);
-  const now = new Date().toISOString();
-  await db().prepare(
-    `UPDATE activity_devices SET slot_status = 'released', reserved_until = NULL,
-     left_at = ?, last_seen_at = ? WHERE activity_id = ? AND device_id = ?`,
-  ).bind(now, now, activityId, deviceId).run();
-  const occupied = await countOccupiedSlots(activityId);
-  if (occupied === 0) {
-    await db().prepare(
-      `UPDATE activities SET all_devices_disconnected_at = ?, updated_at = ?
-       WHERE id = ? AND status = 'active'`,
-    ).bind(now, now, activityId).run();
+  const activity = await getActivityRow(activityId);
+  if (activity.status !== 'active') {
+    return { ok: true, closed: true, contextId: activity.context_id };
   }
-  return { ok: true };
+  if (activity.created_by_user_id === user.userId) {
+    await closeOwnedActivity(activity);
+    return { ok: true, closed: true, contextId: activity.context_id };
+  }
+  await leaveAsParticipant(activity, user.userId, deviceId);
+  return { ok: true, closed: false, contextId: activity.context_id };
+}
+
+export async function assignControllers(
+  user: AppUser,
+  activityIdValue: unknown,
+  deviceIdValue: unknown,
+  controllerIdsValue: unknown,
+) {
+  const activityId = String(activityIdValue ?? '');
+  const deviceId = cleanDeviceId(deviceIdValue);
+  const activity = await getActivityRow(activityId);
+  await assertOwner(activity, user.userId);
+  if (activity.status !== 'active') throw new StoreError(409, copy.errors.activityNotActive);
+  const { acceptedPlayerIds } = await consentStatus(
+    activityId,
+    await registeredPlayerIdsFor(activity.context_id),
+  );
+  const ids = Array.isArray(controllerIdsValue) ? controllerIdsValue : [];
+  const normalized = normalizeControllerIds(ids, acceptedPlayerIds);
+  if (!normalized.ok) {
+    if (normalized.reason === 'guest') {
+      throw new StoreError(400, copy.errors.guestsCannotControlScore);
+    }
+    if (normalized.reason === 'not-accepted') {
+      throw new StoreError(409, copy.errors.cannotAssignPendingController);
+    }
+    throw new StoreError(400, copy.errors.chooseOneOrTwoControllers);
+  }
+  await writeControllers(activityId, normalized.controllerUserIds);
+  return getActivity(activityId, deviceId, false, user.userId);
 }
 
 async function completeSet(
@@ -1061,36 +1291,6 @@ async function abandonIfExpired(activity: ActivityRow) {
     ));
   }
   await db().batch(statements);
-}
-
-async function assertConnected(activityId: string, deviceId: string) {
-  const row = await db().prepare(
-    `SELECT device_label, slot_status, reserved_until, last_seen_at FROM activity_devices
-     WHERE activity_id = ? AND device_id = ?`,
-  ).bind(activityId, deviceId).first<{
-    device_label: string;
-    slot_status: string;
-    reserved_until: string | null;
-    last_seen_at: string;
-  }>();
-  if (!row || row.slot_status === 'released') {
-    throw new StoreError(403, copy.errors.deviceNoLongerConnected);
-  }
-  const reservationExpiry = row.reserved_until
-    ? Date.parse(row.reserved_until)
-    : Date.parse(row.last_seen_at) + SLOT_RESERVATION_MS;
-  if (row.slot_status === 'reserved' && reservationExpiry <= Date.now()) {
-    await db().prepare(
-      `UPDATE activity_devices SET slot_status = 'released', reserved_until = NULL WHERE activity_id = ? AND device_id = ?`,
-    ).bind(activityId, deviceId).run();
-    throw new StoreError(403, copy.errors.deviceNoLongerConnected);
-  }
-  await db().prepare(
-    `UPDATE activity_devices SET slot_status = 'active', reserved_until = NULL,
-     last_seen_at = ?, left_at = NULL WHERE activity_id = ? AND device_id = ?`,
-  ).bind(new Date().toISOString(), activityId, deviceId).run();
-  await refreshDeviceSlots(activityId);
-  return { device_label: row.device_label };
 }
 
 async function getActivityRow(activityId: string) {

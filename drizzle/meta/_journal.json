@@ -57,6 +57,13 @@
       "when": 1788698605672,
       "tag": "0007_rainy_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788885385278,
+      "tag": "0008_shallow_siren",
+      "breakpoints": true
     }
   ]
 }
