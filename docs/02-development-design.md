@@ -39,7 +39,7 @@ The implemented stack:
 - Authentication: [better-auth](https://better-auth.com) with the Google social provider and the `admin` plugin.
 - Styling: mobile-first responsive CSS with explicit portrait and landscape layouts, strong color contrast, and restrained animations. Chrome colors come from the logo branding tokens in `app/globals.css`.
 - Testing: unit tests for scoring, leaderboard, and admin-access functions, run with the Node test runner.
-- Deployment: GitHub Actions. Feature PRs target `development`. Promotion is one-way `development` → `production`. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys. The default branch is `development`. There is no `main` branch.
+- Deployment: GitHub Actions. Feature PRs target `development`. Promotion is one-way `development` → `production`. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys. The default branch is `development`. `main` still exists but is not part of this path.
 
 ### Branding
 
@@ -1249,6 +1249,8 @@ Pull requests into `development` or `production` run `.github/workflows/ci.yml` 
 ### Branch promotion
 
 Promotion is one-way: feature branches target `development`, then `development` → `production`. Each hop is a pull request so `CI / check` can run on the protected target.
+
+Do not open feature PRs into `main`, and do not promote through it. `main` remains on the remote as an unused branch.
 
 Do not open `production` → `development` promotion PRs. Those reverse merges create two merge bases and GitHub reports the same file conflicts on the next hop. After a production deploy, `production` may be one merge commit ahead of `development`; that is expected. Leave it.
 
