@@ -39,7 +39,7 @@ The implemented stack:
 - Authentication: [better-auth](https://better-auth.com) with the Google social provider and the `admin` plugin.
 - Styling: mobile-first responsive CSS with explicit portrait and landscape layouts, strong color contrast, and restrained animations. Chrome colors come from the logo branding tokens in `app/globals.css`.
 - Testing: unit tests for scoring, leaderboard, and admin-access functions, run with the Node test runner.
-- Deployment: GitHub Actions. Feature PRs target `main`. Promotion is one-way `main` → `development` → `production`. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys.
+- Deployment: GitHub Actions. Feature PRs target `development`. Promotion is one-way `development` → `production`. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys. The default branch is `development`. There is no `main` branch.
 
 ### Branding
 
@@ -1244,13 +1244,13 @@ A local production ship is `npm run deploy`, which runs `vinext build` and then 
 
 `@vinext/cloudflare deploy` is not used. That CLI dropped `--config` and its setup check only recognizes a static `import { cloudflare }` from `@cloudflare/vite-plugin`. This repo loads that plugin dynamically in `vite.config.ts` so Wrangler log paths are set before the plugin snapshots them.
 
-Pull requests into `development` or `production` run `.github/workflows/ci.yml` (`CI / check`): lint, tests, and `tsc`. That workflow does not build, migrate, or deploy. Requiring the `CI / check` status on those branches is a GitHub ruleset setting, not something in this repo. Direct pushes skip that merge gate.
+Pull requests into `development` or `production` run `.github/workflows/ci.yml` (`CI / check`): lint, tests, and `tsc`. That workflow does not build, migrate, or deploy. Requiring the `CI / check` status on those branches is a GitHub branch-protection setting, not something in this repo. Direct pushes skip that merge gate.
 
 ### Branch promotion
 
-Promotion is one-way: feature branches target `main`, then `main` → `development` → `production`. Each hop is a pull request so `CI / check` can run on the protected target.
+Promotion is one-way: feature branches target `development`, then `development` → `production`. Each hop is a pull request so `CI / check` can run on the protected target.
 
-Do not open `production` → `main` or `development` → `main` promotion PRs. Those reverse merges create two merge bases and GitHub reports the same file conflicts on the next hop. After a production deploy, `production` may be one merge commit ahead of `main`; that is expected. Leave it.
+Do not open `production` → `development` promotion PRs. Those reverse merges create two merge bases and GitHub reports the same file conflicts on the next hop. After a production deploy, `production` may be one merge commit ahead of `development`; that is expected. Leave it.
 
 If GitHub marks a promotion PR conflicting, do not merge the two long-lived branches directly. Branch from the target, merge the source, and open the PR into the target.
 

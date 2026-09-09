@@ -163,13 +163,11 @@ flowchart TD
 
 ## 1.0.2 Deployment Flow
 
-Promotion is one-way: feature → `main` → `development` → `production`. Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub ruleset setting. Push to `production` still deploys. Do not merge `production` or `development` back into `main`.
+Promotion is one-way: feature → `development` → `production`. Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub branch-protection setting. Push to `production` still deploys. Do not merge `production` back into `development`.
 
 ```mermaid
 flowchart TD
-  F[Feature PR into main] --> M[main]
-  M --> P1[PR main into development]
-  P1 --> C1[CI check]
+  F[Feature PR into development] --> C1[CI check]
   C1 -->|fail| D1[Merge blocked if required]
   C1 -->|pass| Dev[development]
   Dev --> P2[PR development into production]
