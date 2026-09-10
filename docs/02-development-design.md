@@ -603,6 +603,7 @@ Validation:
 
 Display:
 
+- A compact horizontal Blue/Red banner with gradient side assets, live HTML team labels, and two stacked player names per team, each with a colored ball icon. A decorative VS slash sits between the sides. The banner stays one row on phones. Existing side assets are cropped to the outer edges so racket motifs remain visible.
 - A roster of every registered member as In or Pending. Guests are not listed.
 - Owner picker for 1-2 live-score controllers among accepted players.
 - Non-owners see a waiting message after a set has been played, instead of the live scoreboard.
