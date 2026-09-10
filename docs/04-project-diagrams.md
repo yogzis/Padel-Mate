@@ -217,6 +217,20 @@ flowchart TD
   G -->|Set setup| K[Activity Lobby]
 ```
 
+## 1.2.1 Between Sets
+
+```mermaid
+flowchart TD
+  A[Set Confirmed] --> B[phase set-setup]
+  B --> C[Owner Lobby]
+  B --> D[Everyone Else Lobby]
+  D --> E[Waiting for Owner to Start Next Set]
+  C --> F[Owner Starts Set]
+  F --> G[phase live]
+  G --> H[Controllers Writable Board]
+  G --> I[Others Read-Only Board]
+```
+
 ## 1.3 Activity Session Slot Lifecycle
 
 ```mermaid

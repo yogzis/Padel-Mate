@@ -458,7 +458,21 @@ label:has(select:focus-visible) {
 .sticky-action { display: flex; justify-content: flex-end; margin-top: 22px; }
 
 .activity-heading { align-items: center; }
-.heading-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.heading-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
+.heading-actions button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: white;
+  color: #334250;
+}
+.heading-actions button:disabled { opacity: .55; }
 .team-builder { display: grid; grid-template-columns: minmax(0, 1fr) 50px minmax(0, 1fr); align-items: stretch; margin-bottom: 18px; }
 .team-preview { display: flex; min-height: 112px; flex-direction: column; justify-content: center; padding: 20px; color: white; }
 .team-preview span { font-size: 11px; font-weight: 850; text-transform: uppercase; }
@@ -491,7 +505,15 @@ label:has(select:focus-visible) {
 .save-indicator.saving { background: #27362b; color: #e0e8e2; }
 .save-indicator.retry { background: #4a3514; color: #ffe0a5; }
 .save-indicator.offline { background: #4c2025; color: #ffc8ce; }
-.device-count { background: #202b24; color: #cad3cd; }
+.device-count { border: 0; background: #202b24; color: #cad3cd; }
+.controller-chip { position: relative; }
+.controller-chip-trigger { cursor: pointer; }
+.controller-menu { position: absolute; top: 36px; right: 0; z-index: 50; width: min(260px, calc(100vw - 28px)); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: white; box-shadow: 0 18px 50px rgba(10, 42, 68, .14); color: var(--ink); }
+.controller-menu p { margin: 0; padding: 12px 14px 8px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.controller-menu > button { display: grid; width: 100%; min-height: 48px; grid-template-columns: 32px minmax(0, 1fr) 22px; align-items: center; gap: 10px; border: 0; border-top: 1px solid var(--soft-line); background: white; padding: 8px 12px; color: var(--ink); text-align: left; font-size: 13px; font-weight: 700; }
+.controller-menu > button.selected { background: #eef6ff; }
+.controller-menu > button.selected .check-circle { border-color: var(--blue); background: var(--blue); }
+.controller-menu > button:disabled { opacity: .55; }
 .score-court { position: relative; display: grid; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr) 52px minmax(0, 1fr); }
 .score-team { display: grid; min-height: 0; overflow: hidden; grid-template-rows: auto auto minmax(0, 1fr) auto; align-items: center; justify-items: center; gap: 8px; border: 0; padding: 12px 16px 14px; color: white; }
 .score-team:disabled { opacity: 1; }
@@ -584,9 +606,8 @@ label:has(select:focus-visible) {
   .group-toolbar { flex-wrap: wrap; }
   .group-toolbar .group-search { flex: 1 1 100%; }
   .group-list { --group-row-height: 65px; }
-  .context-topline .primary-button, .heading-actions { width: 100%; }
+  .context-topline .primary-button { width: 100%; }
   .history-only-note { max-width: none; text-align: left; }
-  .heading-actions .icon-text-button { flex: 1; }
   .group-row { grid-template-columns: 92px minmax(0, 1fr) auto 20px; gap: 10px; padding: 13px 11px; }
   .avatar-stack { padding-left: 22px; }
   .context-builder, .add-player-band { padding: 17px; }
