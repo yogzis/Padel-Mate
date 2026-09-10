@@ -290,7 +290,8 @@
 - [ ] Player names are visible under each team.
 - [ ] Buttons are large enough for touch.
 - [x] On phones, Groups and Mates are available from the header menu.
-- [x] The signed-in header shows the Padel Mate wordmark logo.
+- [x] The signed-in header shows the horizontal Padel Mate lockup.
+- [x] Chrome, sign-in, invite, and admin pages show a dark brand footer that reveals at the end of the page and fades out when the user scrolls away. The live scoreboard does not.
 - [x] App chrome uses the logo navy and royal blue tokens. The live scoreboard stays dark olive with Blue and Red teams.
 - [x] Static UI copy is edited in `copy/en/`, not inside components.
 - [x] Chrome focus rings, control borders, and Red Team score text meet WCAG 2.2 AA contrast.

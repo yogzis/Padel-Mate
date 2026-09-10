@@ -63,6 +63,7 @@ import { visiblePickerPlayers, type MateCircle } from '../lib/mate-circle';
 import { formatMateInviteCountdown } from '../lib/mate-invite';
 import { awardPoint } from '../lib/scoring';
 import { copy } from '../copy';
+import { AppFooter } from './app-footer';
 import { ShareInviteDialog } from './share-invite-dialog';
 import { ChromeSelect } from './chrome-select';
 import { TeamVsTeamBanner } from './team-vs-banner';
@@ -803,6 +804,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       )}
       {notice && <div className="toast" role="status"><CheckCircle2 size={17} />{notice}</div>}
       {main}
+      {screen !== 'scoreboard' && <AppFooter />}
 
       {activityData?.activity.state.pendingGameWinner && activityData.viewerIsOwner && (
         <ConfirmDialog
@@ -927,7 +929,10 @@ function AppHeader({
     <header className="app-header">
       <div className="header-inner">
         <button className="brand" onClick={() => onNavigate('groups')} aria-label={copy.chrome.homeAria}>
-          <img className="brand-logo" src="/padel-mate-logo.png" alt="" width={160} height={52} />
+          <picture>
+            <source srcSet="/padel-mate-logo.webp" type="image/webp" />
+            <img className="brand-logo" src="/padel-mate-logo.png" alt="" width={404} height={122} />
+          </picture>
         </button>
 
         <nav className="desktop-nav" aria-label={copy.chrome.mainNavAria}>

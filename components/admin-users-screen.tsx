@@ -4,6 +4,7 @@ import { ArrowLeft, ShieldCheck, ShieldOff } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { copy } from '../copy';
+import { AppFooter } from './app-footer';
 import type { AdminUserRow } from '../lib/server/admin-users';
 
 type AdminResponse = { users?: AdminUserRow[]; error?: string };
@@ -102,6 +103,7 @@ export default function AdminUsersScreen({
           ))}
         </div>
       </div>
+      <AppFooter />
     </div>
   );
 }
