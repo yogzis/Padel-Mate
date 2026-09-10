@@ -68,8 +68,6 @@ export const errors = {
     inviteReady: 'Invite link ready. Share it directly with the person you want to play with.',
     inviteDeleted: 'Invite link deleted.',
     mateRemoved: 'Mate removed.',
-    reviewPartial: 'Review the saved partial set before continuing.',
-    activityFinishedSaved: 'Activity finished and saved.',
     leftActivity: 'You left the activity. Rejoin from this group when you are ready.',
     ownerClosedActivity: 'The owner closed this activity.',
     youClosedActivity: 'You closed this activity.',

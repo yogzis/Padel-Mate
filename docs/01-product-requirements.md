@@ -131,11 +131,11 @@ A player can be in only one activity at a time. The group dashboard lists every 
 
 New scores require two things: the registered members are still mates of the host, and every registered member has accepted this activity. The host accepts by creating it. Everyone else accepts by entering the session code or opening the share link. Guests never accept and never rank.
 
-A connected device can log out or leave the session. If a participant leaves, their consent is revoked, they return to the group dashboard, and the activity pauses until they rejoin. If the owner leaves, or joins or creates another activity, their owned activity is closed for everyone: abandoned with a snapshot if a set is live, or finished if not.
+A connected device can log out or leave the session. Leave asks for confirmation first. If a participant confirms Leave, their consent is revoked, they return to the group dashboard, and the activity pauses until they rejoin. Closing the phone or leaving the site is not Leave: the device stays reserved for 1-2 minutes and scoring continues. If the owner confirms Leave, or joins or creates another activity, their owned activity is closed for everyone: abandoned with a snapshot if a set is live, or finished if not.
 
 If a device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available. Unexpected disconnects do not pause the activity.
 
-If all devices disconnect and the activity is not concluded, the activity remains live for 3 hours. After 3 hours, it is marked abandoned with the latest saved score snapshot and no leaderboard impact.
+If all devices disconnect and the activity is not concluded, the activity remains live for 3 hours. After 3 hours, it is marked abandoned. Completed sets already in the set log stay on the leaderboard. An in-progress set is ignored and is not written to the set log. The group dashboard does not offer a way to re-enter a finished or abandoned activity.
 
 ### Set
 
@@ -172,9 +172,9 @@ Platform roles:
 
 Activity roles:
 
-- Owner: the signed-in user who creates the activity. They are accepted immediately. Only the owner selects teams, starts a set, finishes the activity, assigns live-score controllers, undoes a point, confirms a game or set, and ends a set early. Those actions work from the lobby or the live scoreboard.
-- Controller: 1 or 2 accepted registered players chosen by the owner. Default is the owner only. Their devices show the writable red-blue live scoreboard and may tap points. Guests cannot be controllers. Switching controllers takes effect immediately.
-- Participant: a registered member of the context who accepts the activity by code or share link. If they are not a controller, they stay on the lobby or a read-only live score with a watching hint.
+- Owner: the signed-in user who creates the activity. They are accepted immediately. Only the owner selects teams, starts a set, finishes the activity, assigns live-score controllers, undoes a point, confirms a game or set, and ends a set early. Those actions work from the lobby or the live scoreboard. Between sets the owner stays in the lobby. Leave is confirmed before it runs.
+- Controller: 1 or 2 accepted registered players chosen by the owner. Default is the owner only. While a set is live, their devices show the writable red-blue live scoreboard and may tap points. Between sets they stay in the lobby with a waiting message. Guests cannot be controllers. Switching controllers takes effect immediately.
+- Participant: a registered member of the context who accepts the activity by code or share link. If they are not a controller, they stay on the lobby or a read-only live score with a watching hint. Between sets they stay in the lobby with a waiting message.
 
 ### Account Suspension
 
@@ -219,8 +219,8 @@ Authentication is required for global app access in the MVP.
 20. When a set-ending score is reached, the owner confirms before updating the context leaderboard.
 21. The owner may manually end an unfinished set when the real activity time is over.
 22. If a set is manually ended, the owner must confirm whether to calculate the partial set score or disregard the set.
-23. The owner may start another set with a new team pairing. Controllers stay on the live panel between sets.
-24. The owner may end the activity and return to the context dashboard. If the activity is already finished or abandoned, any device that still has that session open, reloads it, or opens its share link is taken to the same context dashboard instead of staying on the activity screen.
+23. The owner may start another set with a new team pairing. Between sets, everyone except the owner stays in the activity lobby with a waiting message. The owner can assign controllers from the lobby and from the live score chip.
+24. The owner may end the activity and return to the context dashboard. If the activity is already finished or abandoned, any device that still has that session open, reloads it, opens its share link, or enters its session code is taken to the same context dashboard instead of staying on the activity screen. The dashboard does not show a live or review card for that activity.
 
 ## 6. Activity Configuration Requirements
 
@@ -570,17 +570,17 @@ Acceptance criteria:
 - No more than 2 accepted registered players may be assigned as live-score controllers. Default is the owner. Guests cannot be controllers.
 - Opening a code or share link records consent for a registered context member.
 - A player can be in only one activity at a time.
-- If a participant leaves, consent is revoked, they return to the group dashboard with Join, and scoring pauses until they rejoin.
-- If the owner leaves, or joins or creates another activity, their owned activity is closed for everyone. A live set is abandoned with a snapshot and no leaderboard impact. Otherwise the activity is finished.
+- If a participant leaves, they confirm first. Consent is then revoked, they return to the group dashboard with Join, and scoring pauses until they rejoin. Closing the phone or leaving the site does not pause play.
+- Owner Leave is confirmed first. If the owner confirms Leave, or joins or creates another activity, their owned activity is closed for everyone. A live set is abandoned: completed sets already in the set log stay on the leaderboard, and the in-progress set is ignored. Otherwise the activity is finished.
 - A person who is not a registered member of the context cannot accept or join.
 - If a connected device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available. Unexpected disconnects do not pause the activity.
 - If all devices disconnect before the activity is concluded, the activity remains live for 3 hours.
-- After 3 hours with no connected devices, an unconcluded activity is marked abandoned with the latest saved scoring snapshot and no leaderboard impact.
-- A signed-in user may later reopen an abandoned activity and manually choose whether to calculate a partial set or disregard it.
+- After 3 hours with no connected devices, an unconcluded activity is marked abandoned. Completed sets already in the set log stay on the leaderboard. An in-progress set is ignored and is not written to the set log.
+- Finished and abandoned activities are not enterable. The group dashboard lists only active activities. A share link, session code, or last-session reload for a closed activity opens that context dashboard with a finished notice.
 - If a device disconnects and reconnects, it must fetch the latest backend state before allowing new score updates.
 - The backend must prevent duplicate or out-of-order score updates from corrupting the game state.
 - If two devices attempt to score at the same time, the backend must apply a single ordered sequence of accepted events and both devices must converge to the same latest state.
-- If the activity has already finished, the user is taken to that context dashboard. They must not remain on the finished activity screen.
+- If the activity has already finished or been abandoned, the user is taken to that context dashboard. They must not remain on the activity screen.
 
 ### FR-15 In-Game Score Update History
 
@@ -615,7 +615,8 @@ Acceptance criteria:
 ### Usability
 
 - Mobile phone usage is the primary experience.
-- The signed-in header and the sign-in card show the Padel Mate wordmark logo in place of a separate icon and title.
+- The signed-in header and the sign-in card show the horizontal Padel Mate lockup (circular PM mark plus wordmark) in place of a separate icon and title.
+- Chrome pages have a dark brand footer with the circular mark and two-tone wordmark. It sits after the page content, reveals when it scrolls into view, and fades out when the user scrolls away. The live scoreboard has no footer.
 - App chrome (header, sign-in, buttons, selections, live pills) uses the logo navy and royal blues. The live scoreboard stays dark olive, with Blue Team and Red Team as the only strong team colors.
 - On phones, Groups and Mates are available from the header menu because the header tabs are hidden.
 - Main scoring buttons must be large enough for quick use during play.
@@ -639,7 +640,7 @@ Acceptance criteria:
 - A reconnecting device must restore from the backend before accepting new scoring input.
 - Session slots must be released immediately when a device leaves intentionally.
 - Unexpected disconnects must reserve the device slot for only 1-2 minutes.
-- Abandoned sessions must preserve the latest snapshot without updating the leaderboard automatically.
+- Abandoned sessions must not update the leaderboard. Completed sets already in the set log stand. An in-progress set is ignored.
 
 ### Maintainability
 
@@ -699,7 +700,7 @@ Included:
 - Near real-time in-game score synchronization across connected devices.
 - One activity per player, with concurrent group activities listed by owner name.
 - 1-2 minute reservation window for unexpected device disconnects.
-- 3-hour abandoned-session handling with no automatic leaderboard impact.
+- 3-hour abandoned-session handling that ignores an in-progress set and does not re-enter closed activities.
 
 Deferred:
 

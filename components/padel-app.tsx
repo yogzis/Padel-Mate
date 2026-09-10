@@ -49,7 +49,7 @@ import {
   guestSlotId,
   isGuestSlot,
 } from '../lib/player-identity';
-import { activityIsPaused, shouldShowLiveScoreboard } from '../lib/activity-roles';
+import { activityIsEnterable, activityIsPaused, shouldShowLiveScoreboard, toggleControllerSelection } from '../lib/activity-roles';
 import {
   filterGroupList,
   groupListPrefsKey,
@@ -63,8 +63,10 @@ import { visiblePickerPlayers, type MateCircle } from '../lib/mate-circle';
 import { formatMateInviteCountdown } from '../lib/mate-invite';
 import { awardPoint } from '../lib/scoring';
 import { copy } from '../copy';
+import { AppFooter } from './app-footer';
 import { ShareInviteDialog } from './share-invite-dialog';
 import { ChromeSelect } from './chrome-select';
+import { TeamVsTeamBanner } from './team-vs-banner';
 import { useMateInviteCountdown } from './use-mate-invite-countdown';
 
 type AppUser = { id: string; displayName: string; email: string; isAdmin: boolean };
@@ -125,10 +127,6 @@ type Screen = 'groups' | 'mates' | 'context' | 'configure' | 'set-setup' | 'scor
 function activityScreen(data: ActivityData): Screen {
   return shouldShowLiveScoreboard({
     phase: data.activity.state.phase,
-    viewerIsController: data.viewerIsController,
-    viewerIsOwner: data.viewerIsOwner,
-    completedSetCount: data.logs.length,
-    setNumber: data.activity.state.setNumber,
   }) ? 'scoreboard' : 'set-setup';
 }
 
@@ -230,7 +228,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
   const [joinCode, setJoinCode] = useState('');
   const [config, setConfig] = useState<ActivityConfig>(DEFAULT_CONFIG);
   const [bluePlayerIds, setBluePlayerIds] = useState<string[]>([]);
-  const [modal, setModal] = useState<'history' | 'share' | 'mate-invite' | 'replace-invite' | 'manual' | null>(null);
+  const [modal, setModal] = useState<'history' | 'share' | 'mate-invite' | 'replace-invite' | 'manual' | 'leave' | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [matesRefreshing, setMatesRefreshing] = useState(false);
@@ -321,7 +319,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         activityId: activeActivityId,
         deviceId,
       });
-      if (fresh.activity.status === 'completed' || fresh.activity.status === 'abandoned') {
+      if (!activityIsEnterable(fresh.activity.status)) {
         await returnToContext(
           fresh.activity.contextId,
           fresh.activity.id,
@@ -477,7 +475,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         activityRef: reference.trim(),
         deviceId,
       });
-      if (data.activity.status === 'completed') {
+      if (!activityIsEnterable(data.activity.status)) {
         await returnToContext(data.activity.contextId, data.activity.id);
         setJoinCode('');
         return data;
@@ -488,15 +486,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       setBluePlayerIds(data.activity.state.bluePlayerIds.length === 2
         ? data.activity.state.bluePlayerIds
         : firstTwoSlotIds(data.players));
-      if (data.activity.status === 'abandoned' && data.activity.state.phase === 'live') {
-        setScreen('scoreboard');
-        if (data.viewerIsOwner) {
-          setModal('manual');
-          setNotice(copy.errors.notices.reviewPartial);
-        }
-      } else {
-        setScreen(activityScreen(data));
-      }
+      setScreen(activityScreen(data));
       setJoinCode('');
       return data;
     } catch (caught) {
@@ -541,7 +531,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
           if (cached) {
             try {
               const restored = JSON.parse(cached) as ActivityData;
-              if (restored.activity.status === 'completed') {
+              if (!activityIsEnterable(restored.activity.status)) {
                 void returnToContext(restored.activity.contextId, restored.activity.id);
                 return;
               }
@@ -652,27 +642,12 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
     }
   };
 
-  const finishActivity = async () => {
-    if (!activityData) return;
-    setBusy(true);
-    try {
-      await apiPost({ action: 'finish-activity', activityId: activityData.activity.id, deviceId });
-      await returnToContext(
-        activityData.activity.contextId,
-        activityData.activity.id,
-        copy.errors.notices.activityFinishedSaved,
-      );
-    } catch (caught) {
-      setError(messageOf(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const leaveActivity = async () => {
     if (!activityData) return;
     const contextId = activityData.activity.contextId;
     const activityId = activityData.activity.id;
+    setBusy(true);
+    setError('');
     try {
       const result = await apiPost<{ ok: true; closed: boolean; contextId: string }>({
         action: 'leave-activity',
@@ -686,10 +661,14 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       );
     } catch (caught) {
       setError(messageOf(caught));
-      await returnToContext(contextId, activityId, copy.errors.notices.leftActivity);
     } finally {
-      setMenuOpen(false);
+      setBusy(false);
     }
+  };
+
+  const requestLeave = () => {
+    setMenuOpen(false);
+    setModal('leave');
   };
 
   const navigate = (next: Screen) => {
@@ -768,7 +747,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
               setBusy(false);
             }
           }}
-          onFinish={finishActivity}
+          onLeave={requestLeave}
           busy={busy}
         />
       );
@@ -784,7 +763,8 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
           onHistory={() => setModal('history')}
           onShare={() => setModal('share')}
           onManual={() => setModal('manual')}
-          onLeave={leaveActivity}
+          onAssignControllers={assignControllers}
+          onLeave={requestLeave}
         />
       );
     }
@@ -814,7 +794,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         menuOpen={menuOpen}
         onMenu={() => setMenuOpen((value) => !value)}
         onNavigate={navigate}
-        onLeave={leaveActivity}
+        onLeave={requestLeave}
       />
       {error && (
         <div className="alert-bar" role="alert">
@@ -824,6 +804,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       )}
       {notice && <div className="toast" role="status"><CheckCircle2 size={17} />{notice}</div>}
       {main}
+      {screen !== 'scoreboard' && <AppFooter />}
 
       {activityData?.activity.state.pendingGameWinner && activityData.viewerIsOwner && (
         <ConfirmDialog
@@ -853,6 +834,17 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         />
       )}
 
+      {modal === 'leave' && activityData && (
+        <ConfirmDialog
+          title={activityData.viewerIsOwner ? copy.live.endActivityTitle : copy.live.leaveConfirmTitle}
+          description={activityData.viewerIsOwner ? copy.live.endActivityBody : copy.live.leaveConfirmBody}
+          confirmLabel={activityData.viewerIsOwner ? copy.live.endActivityAction : copy.live.leaveConfirmAction}
+          cancelLabel={copy.chrome.cancel}
+          onConfirm={() => { void leaveActivity(); }}
+          onCancel={() => setModal(null)}
+          busy={busy}
+        />
+      )}
       {modal === 'history' && activityData && (
         <HistoryModal data={activityData} onClose={() => setModal(null)} />
       )}
@@ -937,7 +929,10 @@ function AppHeader({
     <header className="app-header">
       <div className="header-inner">
         <button className="brand" onClick={() => onNavigate('groups')} aria-label={copy.chrome.homeAria}>
-          <img className="brand-logo" src="/padel-mate-logo.png" alt="" width={160} height={52} />
+          <picture>
+            <source srcSet="/padel-mate-logo.webp" type="image/webp" />
+            <img className="brand-logo" src="/padel-mate-logo.png" alt="" width={404} height={122} />
+          </picture>
         </button>
 
         <nav className="desktop-nav" aria-label={copy.chrome.mainNavAria}>
@@ -1321,8 +1316,7 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
   onOpenActivity: (id: string) => void;
 }) {
   const logsByActivity = useMemo(() => groupLogs(data.logs), [data.logs]);
-  const liveActivities = data.activities.filter((activity) => activity.status === 'active');
-  const abandonedActivity = data.activities.find((activity) => activity.status === 'abandoned');
+  const liveActivities = data.activities.filter((activity) => activityIsEnterable(activity.status));
   return (
     <main className="page-content">
       <section className="context-topline">
@@ -1373,16 +1367,6 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
               </button>
             </section>
           ))}
-          {abandonedActivity && (
-            <section className="resume-panel">
-              <span className="live-dot"><span /> {copy.dashboard.savedPartial}</span>
-              <h3>{copy.dashboard.ownerActivity(abandonedActivity.ownerName)}</h3>
-              <button className="secondary-button" onClick={() => onOpenActivity(abandonedActivity.id)}>
-                {copy.dashboard.reviewResult}
-                {' '}<ChevronRight size={17} />
-              </button>
-            </section>
-          )}
         </aside>
       </div>
 
@@ -1442,15 +1426,15 @@ function SettingGroup<T extends string>({ title, icon, options, value, onChange 
   );
 }
 
-function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh, onFinish, onAssignControllers, busy }: {
+function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh, onAssignControllers, onLeave, busy }: {
   data: ActivityData;
   blueIds: string[];
   onBlueChange: (ids: string[]) => void;
   onStart: () => void;
   onShare: () => void;
   onRefresh: () => void;
-  onFinish: () => void;
   onAssignControllers: (ids: string[]) => void;
+  onLeave: () => void;
   busy: boolean;
 }) {
   const slots = matchSlotsFrom(data.players);
@@ -1465,16 +1449,15 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
   const waitingForAccepts = !consentKnown || inCount < registeredPlayers.length;
   const paused = activityIsPaused(data.pendingPlayerIds);
   const isOwner = data.viewerIsOwner;
+  const hasPlayedASet = data.logs.length > 0 || data.activity.state.setNumber > 1;
+  const lobbyIntro = isOwner
+    ? copy.live.setTeamsIntro
+    : hasPlayedASet
+      ? copy.live.waitingForNextSet(data.ownerName)
+      : copy.live.ownerOnlyTeams;
   const toggleController = (playerId: string) => {
-    const selected = new Set(data.controllerUserIds);
-    if (selected.has(playerId)) {
-      if (selected.size <= 1) return;
-      selected.delete(playerId);
-    } else {
-      if (selected.size >= 2) return;
-      selected.add(playerId);
-    }
-    onAssignControllers([...selected]);
+    const next = toggleControllerSelection(data.controllerUserIds, playerId);
+    if (next) onAssignControllers(next);
   };
   return (
     <main className="page-content setup-page">
@@ -1482,11 +1465,12 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
         <div>
           <span className="live-dot"><span /> {copy.dashboard.ownerActivity(data.ownerName)}</span>
           <h1>{copy.live.setTeamsHeading(data.activity.state.setNumber)}</h1>
-          <p>{isOwner ? copy.live.setTeamsIntro : copy.live.ownerOnlyTeams}</p>
+          <p>{lobbyIntro}</p>
         </div>
         <div className="heading-actions">
-          <button className="icon-text-button" onClick={onRefresh} disabled={busy}><RefreshCw size={18} /> {copy.chrome.refresh}</button>
-          <button className="icon-text-button" onClick={onShare}><Share2 size={18} /> {copy.live.share}</button>
+          <button onClick={onLeave} disabled={busy} aria-label={copy.live.leaveActivity} title={copy.live.leaveActivity}><LogOut size={18} /></button>
+          <button onClick={onRefresh} disabled={busy} aria-label={copy.chrome.refresh} title={copy.chrome.refresh}><RefreshCw size={18} /></button>
+          <button onClick={onShare} aria-label={copy.live.shareActivity} title={copy.live.shareActivity}><Share2 size={18} /></button>
         </div>
       </section>
 
@@ -1494,11 +1478,10 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
         <p className="pause-banner">{copy.live.pausedWaiting(pendingPlayerNames(data))}</p>
       )}
 
-      <section className="team-builder">
-        <div className="team-preview blue-preview"><span>{copy.live.blueTeam}</span><strong>{bluePlayers.length === 2 ? bluePlayers.map((player) => player.name).join(' & ') : copy.live.chooseTwoPlayers}</strong></div>
-        <div className="versus">{copy.live.vs}</div>
-        <div className="team-preview red-preview"><span>{copy.live.redTeam}</span><strong>{redPlayers.length === 2 ? redPlayers.map((player) => player.name).join(' & ') : copy.live.waiting}</strong></div>
-      </section>
+      <TeamVsTeamBanner
+        bluePlayers={bluePlayers.length === 2 ? bluePlayers : null}
+        redPlayers={redPlayers.length === 2 ? redPlayers : null}
+      />
 
       <section className={waitingForAccepts ? 'consent-roster waiting' : 'consent-roster'}>
         <div className="section-title">
@@ -1577,7 +1560,7 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
 
       {isOwner && (
         <div className="setup-actions">
-          <button className="quiet-button" onClick={onFinish}>{copy.live.finishActivity}</button>
+          <button className="quiet-button" onClick={onLeave}>{copy.live.finishActivity}</button>
           <button className="primary-button" onClick={onStart} disabled={blueIds.length !== 2 || busy || waitingForAccepts}>
             {copy.live.startSet(data.activity.state.setNumber)} <ChevronRight size={18} />
           </button>
@@ -1587,7 +1570,7 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
   );
 }
 
-function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, onManual, onLeave }: {
+function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, onManual, onAssignControllers, onLeave }: {
   data: ActivityData;
   status: SaveStatus;
   busy: boolean;
@@ -1596,6 +1579,7 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
   onHistory: () => void;
   onShare: () => void;
   onManual: () => void;
+  onAssignControllers: (ids: string[]) => void;
   onLeave: () => void;
 }) {
   const state = data.activity.state;
@@ -1630,7 +1614,7 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
         <div><span>{activityTitle(data.activity.activityNumber)}</span><strong>{copy.live.setNumber(state.setNumber)}</strong></div>
         <div className="status-items">
           <StatusIndicator status={status} />
-          <span className="device-count"><Smartphone size={15} /> {copy.live.controllerCap(data.controllerUserIds.length)}</span>
+          <ControllerChip data={data} busy={busy} onAssign={onAssignControllers} />
           <button onClick={onHistory} aria-label={copy.live.scoreHistory} title={copy.live.scoreHistory}><History size={19} /></button>
           <button onClick={onShare} aria-label={copy.live.shareActivity} title={copy.live.shareActivity}><Share2 size={19} /></button>
           <button onClick={onLeave} aria-label={copy.live.leaveActivity} title={copy.live.leaveActivity}><LogOut size={19} /></button>
@@ -1687,6 +1671,88 @@ function Scoreboard({ data, status, busy, onPoint, onUndo, onHistory, onShare, o
         ) : <span />}
       </section>
     </main>
+  );
+}
+
+function ControllerChip({
+  data,
+  busy,
+  onAssign,
+}: {
+  data: ActivityData;
+  busy: boolean;
+  onAssign: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const acceptedIds = new Set(data.acceptedPlayerIds);
+  const candidates = data.players.filter((player) => !isGuestSlot(player.id) && acceptedIds.has(player.id));
+  const chip = (
+    <>
+      <Smartphone size={15} /> {copy.live.controllerCap(data.controllerUserIds.length)}
+    </>
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  if (!data.viewerIsOwner) {
+    return <span className="device-count">{chip}</span>;
+  }
+
+  return (
+    <div className="controller-chip" ref={rootRef}>
+      <button
+        type="button"
+        className="device-count controller-chip-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={copy.live.scoreControllersAria}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {chip}
+      </button>
+      {open && (
+        <div className="controller-menu" role="listbox" aria-label={copy.live.scoreControllers}>
+          <p>{copy.live.scoreControllersHint}</p>
+          {candidates.map((player, index) => {
+            const selected = data.controllerUserIds.includes(player.id);
+            return (
+              <button
+                key={player.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={selected ? 'selected' : ''}
+                disabled={busy || (!selected && data.controllerUserIds.length >= 2)}
+                onClick={() => {
+                  const next = toggleControllerSelection(data.controllerUserIds, player.id);
+                  if (next) onAssign(next);
+                }}
+              >
+                <span className={`avatar avatar-${index % 4 + 1}`}>{initials(player.name)}</span>
+                <strong>{player.name}</strong>
+                <span className="check-circle">{selected && <Check size={15} />}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -14,11 +14,13 @@ import type {
 } from '../domain';
 import { EMPTY_LIVE_STATE } from '../domain';
 import {
+  activityIsEnterable,
   activityIsPaused,
   closeOwnedOutcome,
   controllersOf,
   exclusiveReleaseKind,
   normalizeControllerIds,
+  setLogIsVisible,
   stripController,
 } from '../activity-roles';
 import {
@@ -391,29 +393,10 @@ async function finishActivityRecord(activity: ActivityRow) {
 async function abandonActivityNow(activity: ActivityRow) {
   if (activity.status !== 'active') return;
   const now = new Date().toISOString();
-  const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  const statements: D1PreparedStatement[] = [
-    db().prepare(
-      `UPDATE activities SET status = 'abandoned', abandoned_at = ?, updated_at = ?,
-       version = version + 1 WHERE id = ? AND status = 'active'`,
-    ).bind(now, now, activity.id),
-  ];
-  if (state.activeSetId) {
-    const activityNumber = await assignActivityNumber(activity);
-    statements.push(db().prepare(
-      `INSERT OR IGNORE INTO set_logs
-        (id, context_id, activity_id, activity_number, activity_date, set_id, set_number,
-         blue_player_ids_json, red_player_ids_json, blue_games, red_games, winner_team,
-         conclusion_type, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'abandoned', ?)`,
-    ).bind(
-      `abandoned-${activity.id}`, activity.context_id, activity.id, activityNumber,
-      activity.started_at, state.activeSetId, state.setNumber,
-      JSON.stringify(state.bluePlayerIds), JSON.stringify(state.redPlayerIds),
-      state.blueGames, state.redGames, now,
-    ));
-  }
-  await db().batch(statements);
+  await db().prepare(
+    `UPDATE activities SET status = 'abandoned', abandoned_at = ?, updated_at = ?,
+     version = version + 1 WHERE id = ? AND status = 'active'`,
+  ).bind(now, now, activity.id).run();
 }
 
 async function closeOwnedActivity(activity: ActivityRow) {
@@ -528,7 +511,7 @@ export async function getContext(contextId: string, viewerPlayerId?: string) {
         a.created_by_user_id, p.name AS owner_name
        FROM activities a
        JOIN player_profiles p ON p.id = a.created_by_user_id
-       WHERE a.context_id = ? AND a.status IN ('active', 'abandoned')
+       WHERE a.context_id = ? AND a.status = 'active'
        ORDER BY a.started_at DESC`,
     ).bind(contextId),
   ]);
@@ -543,7 +526,8 @@ export async function getContext(contextId: string, viewerPlayerId?: string) {
     },
     players: (playersResult.results as Record<string, unknown>[]).map(mapPlayer),
     leaderboard: (leaderboardResult.results as Record<string, unknown>[]).map(mapLeaderboard),
-    logs: (logsResult.results as Record<string, unknown>[]).map(mapSetLog),
+    logs: (logsResult.results as Record<string, unknown>[]).map(mapSetLog)
+      .filter((log) => setLogIsVisible(log.conclusionType)),
     activities: await attachViewerAcceptance(
       (activitiesResult.results as Record<string, unknown>[]).map((row) => ({
         id: String(row.id),
@@ -625,13 +609,11 @@ export async function joinActivity(
   if (!memberIds.includes(user.userId)) {
     throw new StoreError(403, copy.errors.onlyGroupCanAccept);
   }
-  if (activity.status === 'completed') {
+  if (!activityIsEnterable(activity.status)) {
     return getActivity(activity.id, deviceId, false, user.userId);
   }
 
-  if (activity.status === 'active') {
-    await releaseOtherActivities(user, activity.id);
-  }
+  await releaseOtherActivities(user, activity.id);
 
   await recordConsent(activity.id, user.userId);
   await refreshDeviceSlots(activity.id);
@@ -723,7 +705,8 @@ export async function getActivity(
       lastSeenAt: String(row.last_seen_at),
       reservedUntil: row.reserved_until ? String(row.reserved_until) : null,
     })),
-    logs: logsResult.results.map(mapSetLog),
+    logs: logsResult.results.map(mapSetLog)
+      .filter((log) => setLogIsVisible(log.conclusionType)),
     history: historyResult.results.map(mapScoreEvent).reverse(),
     acceptedPlayerIds: consents.acceptedPlayerIds,
     pendingPlayerIds: consents.pendingPlayerIds,
@@ -1268,29 +1251,7 @@ async function abandonIfExpired(activity: ActivityRow) {
   if (rows.results.some((row) => row.slot_status === 'active' || row.slot_status === 'reserved')) return;
   const lastSeen = rows.results.reduce((latest, row) => Math.max(latest, Date.parse(row.last_seen_at)), 0);
   if (!lastSeen || Date.now() - lastSeen < ABANDONMENT_MS) return;
-  const now = new Date().toISOString();
-  const state = parseJson<LiveActivityState>(activity.state_json, EMPTY_LIVE_STATE);
-  const statements: D1PreparedStatement[] = [
-    db().prepare(
-      `UPDATE activities SET status = 'abandoned', abandoned_at = ?, updated_at = ? WHERE id = ?`,
-    ).bind(now, now, activity.id),
-  ];
-  if (state.activeSetId) {
-    const activityNumber = await assignActivityNumber(activity);
-    statements.push(db().prepare(
-      `INSERT OR IGNORE INTO set_logs
-        (id, context_id, activity_id, activity_number, activity_date, set_id, set_number,
-         blue_player_ids_json, red_player_ids_json, blue_games, red_games, winner_team,
-         conclusion_type, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'abandoned', ?)`,
-    ).bind(
-      `abandoned-${activity.id}`, activity.context_id, activity.id, activityNumber,
-      activity.started_at, state.activeSetId, state.setNumber,
-      JSON.stringify(state.bluePlayerIds), JSON.stringify(state.redPlayerIds),
-      state.blueGames, state.redGames, now,
-    ));
-  }
-  await db().batch(statements);
+  await abandonActivityNow(activity);
 }
 
 async function getActivityRow(activityId: string) {

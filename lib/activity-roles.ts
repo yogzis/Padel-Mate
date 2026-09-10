@@ -1,4 +1,4 @@
-import type { LiveActivityState } from './domain';
+import type { LiveActivityState, SetLogEntry } from './domain';
 import { isGuestSlot } from './player-identity';
 
 export const MIN_SCORE_CONTROLLERS = 1;
@@ -62,6 +62,14 @@ export function closeOwnedOutcome(phase: LiveActivityState['phase']): CloseOwned
   return phase === 'live' ? 'abandon' : 'finish';
 }
 
+export function activityIsEnterable(status: string): status is 'active' {
+  return status === 'active';
+}
+
+export function setLogIsVisible(conclusionType: SetLogEntry['conclusionType']): boolean {
+  return conclusionType !== 'abandoned';
+}
+
 export function exclusiveReleaseKind(isOwner: boolean): ExclusiveReleaseKind {
   return isOwner ? 'close-owned' : 'leave-as-participant';
 }
@@ -75,15 +83,23 @@ export function stripController(
   return remaining.length > 0 ? remaining : [ownerUserId];
 }
 
+export function toggleControllerSelection(
+  current: readonly string[],
+  playerId: string,
+): string[] | null {
+  const selected = new Set(current);
+  if (selected.has(playerId)) {
+    if (selected.size <= MIN_SCORE_CONTROLLERS) return null;
+    selected.delete(playerId);
+  } else {
+    if (selected.size >= MAX_SCORE_CONTROLLERS) return null;
+    selected.add(playerId);
+  }
+  return [...selected];
+}
+
 export function shouldShowLiveScoreboard(options: {
   phase: LiveActivityState['phase'];
-  viewerIsController: boolean;
-  viewerIsOwner: boolean;
-  completedSetCount: number;
-  setNumber: number;
 }): boolean {
-  if (options.phase === 'live') return true;
-  if (options.viewerIsOwner && options.phase === 'set-setup') return false;
-  const hasPlayedASet = options.completedSetCount > 0 || options.setNumber > 1;
-  return options.phase === 'set-setup' && options.viewerIsController && hasPlayedASet;
+  return options.phase === 'live';
 }

@@ -39,11 +39,11 @@ The implemented stack:
 - Authentication: [better-auth](https://better-auth.com) with the Google social provider and the `admin` plugin.
 - Styling: mobile-first responsive CSS with explicit portrait and landscape layouts, strong color contrast, and restrained animations. Chrome colors come from the logo branding tokens in `app/globals.css`.
 - Testing: unit tests for scoring, leaderboard, and admin-access functions, run with the Node test runner.
-- Deployment: GitHub Actions. Feature PRs target `main`. Promotion is one-way `main` → `development` → `production`. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys.
+- Deployment: GitHub Actions. Feature PRs target `development`. Promotion is one-way `development` → `production`. Pull requests into `development` or `production` run CI (lint, test, tsc). Push to `production` deploys. The default branch is `development`. `main` still exists but is not part of this path.
 
 ### Branding
 
-Logo colors sampled from `public/padel-mate-logo.png`. Chrome uses these tokens. The live scoreboard does not.
+Chrome colors stay the navy and royal tokens below. The header lockup is `public/padel-mate-logo.png` (WebP sibling). The circular mark is `public/padel-mate-mark.png`. Favicons are `public/favicon.ico`, `apple-touch-icon.png`, `icon-192.png`, and `icon-512.png`. The live scoreboard does not use these tokens. Lime in the lockup and footer wordmark is artwork only.
 
 | Token | Hex | Role |
 | --- | --- | --- |
@@ -83,8 +83,9 @@ Responsible for:
 - Calling domain actions.
 - Showing validation errors.
 - Showing Groups and Mates in the header menu on phones, where the header tabs are hidden.
-- Rendering the signed-in header brand as the wordmark image at `/padel-mate-logo.png`. The button keeps the accessible name Padel Mate home.
-- Rendering the same wordmark on the sign-in card. The heading stays available to assistive tech.
+- Rendering the signed-in header brand as the horizontal lockup at `/padel-mate-logo.webp` with a PNG fallback. The button keeps the accessible name Padel Mate home.
+- Rendering the same lockup on the sign-in card. The heading stays available to assistive tech.
+- Rendering a dark brand footer after chrome, sign-in, invite, and admin content. An Intersection Observer fades it in when it enters the viewport and fades it out when the user scrolls away. The live scoreboard omits the footer.
 
 The UI layer should not contain scoring rule complexity.
 
@@ -590,6 +591,8 @@ Controls:
 - Blue Team selection.
 - Red Team selection.
 - Share, which opens the share dialog.
+- Leave, which asks for confirmation before pausing or closing the activity.
+- Finish activity, for the owner, which uses the same confirmation and close path as Leave.
 - Start set button.
 
 Validation:
@@ -601,8 +604,10 @@ Validation:
 
 Display:
 
+- A compact horizontal Blue/Red banner with gradient side assets, live HTML team labels, and two stacked player names per team, each with a colored ball icon. A decorative VS slash sits between the sides. The banner stays one row on phones. Existing side assets are cropped to the outer edges so racket motifs remain visible.
 - A roster of every registered member as In or Pending. Guests are not listed.
 - Owner picker for 1-2 live-score controllers among accepted players.
+- Non-owners see a waiting message after a set has been played, instead of the live scoreboard.
 - Current activity session set log only.
 - Completed sets.
 - Manual partial sets.
@@ -627,7 +632,7 @@ Display:
 - Decisive point indicator when relevant.
 - Save status indicator: Saving, Saved, or Retry needed.
 - Shared session status: Connected, Reconnecting, or Offline.
-- Joined device count when available.
+- Joined device count when available. The owner can open the scoring chip to assign 1-2 accepted controllers.
 - Current-game history action.
 
 Portrait layout requirements:
@@ -665,6 +670,7 @@ Dialogs:
 
 - Game completion confirmation.
 - Set completion confirmation.
+- Leave confirmation. Participant Leave pauses scoring until they rejoin. Owner Leave closes the activity. Closing the phone or leaving the site is not Leave.
 - Manual unfinished set confirmation with calculate or disregard actions.
 - Current-game score update history modal.
 - Share dialog: session code, Copy of the join link, WhatsApp, and connected devices.
@@ -817,10 +823,10 @@ Postconditions:
 - The user must be a registered member of the activity's context.
 - Consent is written first, and the device is recorded for presence.
 - If the player already owns or has accepted another active activity, that other activity is left: owned activities are closed, participated ones are paused.
-- Controllers assigned by the owner receive the writable live scoreboard when a set is live. Other accepted members receive a read-only score or the lobby.
+- Controllers assigned by the owner receive the writable live scoreboard when a set is live. Other accepted members receive a read-only score. Between sets, everyone except the owner stays in the lobby.
 - A connected joining device receives a label based on the signed-in user's display name, such as `Yoni's device`.
 - The client loads the latest backend state, including who has accepted and who is still pending.
-- If the activity is already finished, the client opens that context dashboard instead of the activity screen.
+- If the activity is already finished or abandoned, the client opens that context dashboard instead of the activity screen. Consent and device presence are not recorded.
 
 ### 7.9 Leaving a Shared Activity Session
 
@@ -830,9 +836,10 @@ Preconditions:
 
 Postconditions:
 
+- Leave is confirmed in a dialog before it runs.
 - A participant Leave revokes consent, releases their device, removes them from the controller list, and pauses scoring until they rejoin. They are taken to the group dashboard with Join.
 - An owner Leave closes the activity for everyone: abandon with snapshot if a set is live, otherwise finish. Everyone is taken to the group dashboard.
-- Unexpected disconnect still reserves the device for 1-2 minutes and does not pause the activity.
+- Unexpected disconnect still reserves the device for 1-2 minutes and does not pause the activity. Closing the phone or leaving the site is not Leave.
 
 ### 7.10 Unexpected Device Disconnect
 
@@ -858,9 +865,9 @@ Postconditions:
 
 - The activity remains live for 3 hours.
 - If no device reconnects within 3 hours, the activity is marked abandoned.
-- The latest saved scoring snapshot is preserved.
-- The leaderboard is not updated automatically.
-- A signed-in user may later reopen the abandoned activity and manually choose whether to calculate a partial result or disregard it.
+- The latest saved scoring snapshot is preserved on the activity record.
+- Completed sets already in the set log stay on the leaderboard. An in-progress set is ignored and is not written to the set log.
+- The activity is not enterable. A share link, session code, or last-session reload opens the context dashboard.
 
 ### 7.12 Receiving Remote Score Updates
 
@@ -910,12 +917,13 @@ Preconditions:
 
 - Active activity exists.
 - There is no live set still in progress.
+- From the lobby, Finish activity uses the same confirmation dialog and close path as owner Leave.
 
 Postconditions:
 
 - Activity status becomes completed.
 - Every device still viewing that activity opens the context dashboard.
-- Opening the share link or last-session recovery for a finished activity also opens the context dashboard.
+- Opening the share link or last-session recovery for a finished or abandoned activity also opens the context dashboard.
 
 ## 8. Error Handling
 
@@ -936,7 +944,7 @@ The app should handle these cases:
 - Attempt to accept an activity the user is not a member of.
 - Attempt to score from a disconnected or unrecovered device.
 - Attempt to calculate a tied manual partial set.
-- Attempt to reopen an abandoned activity.
+- Attempt to join a finished or abandoned activity (open the context dashboard instead).
 - Backend save failure.
 - Backend restore failure.
 - Realtime connection loss.
@@ -992,7 +1000,7 @@ Persistence rules:
 - Restore from backend first on reload; use local cache only as a fallback display state while retrying backend restore.
 - Retain the last 5 numbered activity session set logs per scoring context. Empty sessions that never started a set do not occupy this window.
 - Purge older detailed set logs for that context according to retention policy while preserving leaderboard aggregates.
-- Mark abandoned sessions without applying leaderboard updates.
+- Mark abandoned sessions without applying leaderboard updates. Do not write an in-progress set to the set log.
 
 ### 9.1 Backend Consistency Requirements
 
@@ -1078,7 +1086,7 @@ Rules:
 - A person who is not a registered context member cannot accept.
 - If all devices disconnect, the activity remains live for 3 hours.
 - After 3 hours with no connected devices, the activity is marked abandoned.
-- Abandoned activity sessions preserve the latest scoring snapshot but do not update the leaderboard.
+- Abandoned activity sessions do not update the leaderboard. Completed sets already in the set log stand. An in-progress set is ignored. Closed activities are not enterable.
 
 ### 9.7 In-Game History Requirements
 
@@ -1105,7 +1113,7 @@ Retention rules:
 - Older detailed logs for that context may be purged.
 - Purging old detailed logs must not change leaderboard aggregate totals.
 - The Set Setup page shows only the current activity session set log.
-- Current activity logs include normal completed sets, manual partial sets, disregarded sets, and abandoned activity markers where relevant.
+- Current activity logs include normal completed sets, manual partial sets, and disregarded sets. Abandoned in-progress sets are not logged.
 
 ## 10. Testing Strategy
 
@@ -1244,13 +1252,15 @@ A local production ship is `npm run deploy`, which runs `vinext build` and then 
 
 `@vinext/cloudflare deploy` is not used. That CLI dropped `--config` and its setup check only recognizes a static `import { cloudflare }` from `@cloudflare/vite-plugin`. This repo loads that plugin dynamically in `vite.config.ts` so Wrangler log paths are set before the plugin snapshots them.
 
-Pull requests into `development` or `production` run `.github/workflows/ci.yml` (`CI / check`): lint, tests, and `tsc`. That workflow does not build, migrate, or deploy. Requiring the `CI / check` status on those branches is a GitHub ruleset setting, not something in this repo. Direct pushes skip that merge gate.
+Pull requests into `development` or `production` run `.github/workflows/ci.yml` (`CI / check`): lint, tests, and `tsc`. That workflow does not build, migrate, or deploy. Requiring the `CI / check` status on those branches is a GitHub branch-protection setting, not something in this repo. Direct pushes skip that merge gate.
 
 ### Branch promotion
 
-Promotion is one-way: feature branches target `main`, then `main` → `development` → `production`. Each hop is a pull request so `CI / check` can run on the protected target.
+Promotion is one-way: feature branches target `development`, then `development` → `production`. Each hop is a pull request so `CI / check` can run on the protected target.
 
-Do not open `production` → `main` or `development` → `main` promotion PRs. Those reverse merges create two merge bases and GitHub reports the same file conflicts on the next hop. After a production deploy, `production` may be one merge commit ahead of `main`; that is expected. Leave it.
+Do not open feature PRs into `main`, and do not promote through it. `main` remains on the remote as an unused branch.
+
+Do not open `production` → `development` promotion PRs. Those reverse merges create two merge bases and GitHub reports the same file conflicts on the next hop. After a production deploy, `production` may be one merge commit ahead of `development`; that is expected. Leave it.
 
 If GitHub marks a promotion PR conflicting, do not merge the two long-lived branches directly. Branch from the target, merge the source, and open the PR into the target.
 

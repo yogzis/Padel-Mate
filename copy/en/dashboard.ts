@@ -26,8 +26,6 @@ export const dashboard = {
   playersTitle: 'Players',
   liveActivity: 'Live activity',
   ownerActivity: (name: string) => `${name}'s activity`,
-  savedPartial: 'Saved partial activity',
-  reviewResult: 'Review result',
   resumeScoring: 'Resume scoring',
   join: 'Join',
   rejoin: 'Rejoin',

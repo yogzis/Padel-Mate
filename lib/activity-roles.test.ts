@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  activityIsEnterable,
   activityIsPaused,
   closeOwnedOutcome,
   controllersOf,
   exclusiveReleaseKind,
   normalizeControllerIds,
+  setLogIsVisible,
   shouldShowLiveScoreboard,
   stripController,
+  toggleControllerSelection,
 } from './activity-roles';
 
 test('null or empty controller JSON falls back to the owner', () => {
@@ -56,6 +59,19 @@ test('owner close is abandon during a live set and finish otherwise', () => {
   assert.equal(closeOwnedOutcome('ended'), 'finish');
 });
 
+test('only an active activity is enterable', () => {
+  assert.equal(activityIsEnterable('active'), true);
+  assert.equal(activityIsEnterable('completed'), false);
+  assert.equal(activityIsEnterable('abandoned'), false);
+});
+
+test('abandoned set-log markers stay hidden; concluded sets stay visible', () => {
+  assert.equal(setLogIsVisible('abandoned'), false);
+  assert.equal(setLogIsVisible('normal'), true);
+  assert.equal(setLogIsVisible('manual-partial'), true);
+  assert.equal(setLogIsVisible('disregarded'), true);
+});
+
 test('exclusive join closes an owned activity and leaves a participated one', () => {
   assert.equal(exclusiveReleaseKind(true), 'close-owned');
   assert.equal(exclusiveReleaseKind(false), 'leave-as-participant');
@@ -66,40 +82,15 @@ test('removing the last controller restores the owner', () => {
   assert.deepEqual(stripController(['owner-1', 'player-b'], 'player-b', 'owner-1'), ['owner-1']);
 });
 
-test('live scoreboard is for a live set, or for non-owner controllers after a set has been played', () => {
-  assert.equal(shouldShowLiveScoreboard({
-    phase: 'live',
-    viewerIsController: false,
-    viewerIsOwner: false,
-    completedSetCount: 0,
-    setNumber: 1,
-  }), true);
-  assert.equal(shouldShowLiveScoreboard({
-    phase: 'set-setup',
-    viewerIsController: true,
-    viewerIsOwner: false,
-    completedSetCount: 0,
-    setNumber: 1,
-  }), false);
-  assert.equal(shouldShowLiveScoreboard({
-    phase: 'set-setup',
-    viewerIsController: true,
-    viewerIsOwner: false,
-    completedSetCount: 1,
-    setNumber: 2,
-  }), true);
-  assert.equal(shouldShowLiveScoreboard({
-    phase: 'set-setup',
-    viewerIsController: true,
-    viewerIsOwner: true,
-    completedSetCount: 1,
-    setNumber: 2,
-  }), false);
-  assert.equal(shouldShowLiveScoreboard({
-    phase: 'set-setup',
-    viewerIsController: false,
-    viewerIsOwner: false,
-    completedSetCount: 1,
-    setNumber: 2,
-  }), false);
+test('live scoreboard is only for a live set', () => {
+  assert.equal(shouldShowLiveScoreboard({ phase: 'live' }), true);
+  assert.equal(shouldShowLiveScoreboard({ phase: 'set-setup' }), false);
+  assert.equal(shouldShowLiveScoreboard({ phase: 'ended' }), false);
+});
+
+test('controller toggle keeps at least one and at most two', () => {
+  assert.equal(toggleControllerSelection(['owner-1'], 'owner-1'), null);
+  assert.deepEqual(toggleControllerSelection(['owner-1'], 'player-b'), ['owner-1', 'player-b']);
+  assert.equal(toggleControllerSelection(['owner-1', 'player-b'], 'player-c'), null);
+  assert.deepEqual(toggleControllerSelection(['owner-1', 'player-b'], 'player-b'), ['owner-1']);
 });

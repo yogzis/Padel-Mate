@@ -163,13 +163,11 @@ flowchart TD
 
 ## 1.0.2 Deployment Flow
 
-Promotion is one-way: feature → `main` → `development` → `production`. Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub ruleset setting. Push to `production` still deploys. Do not merge `production` or `development` back into `main`.
+Promotion is one-way: feature → `development` → `production`. Pull requests into `development` or `production` run CI first. Requiring `CI / check` on those branches is a GitHub branch-protection setting. Push to `production` still deploys. Do not merge `production` back into `development`. `main` still exists but is not part of this path.
 
 ```mermaid
 flowchart TD
-  F[Feature PR into main] --> M[main]
-  M --> P1[PR main into development]
-  P1 --> C1[CI check]
+  F[Feature PR into development] --> C1[CI check]
   C1 -->|fail| D1[Merge blocked if required]
   C1 -->|pass| Dev[development]
   Dev --> P2[PR development into production]
@@ -210,11 +208,27 @@ flowchart TD
   A[Owner Opens Active Activity] --> B[Share Session Link or Code]
   B --> C[Member Opens Link or Enters Code]
   C --> D[Sign In Required]
-  D --> E[Record Consent and Presence]
-  E --> F{Owner Assigned This Player as Controller?}
-  F -->|Yes and set is live| G[Writable Live Scoreboard]
-  F -->|No and set is live| H[Read-Only Live Score]
-  F -->|Set setup| I[Activity Lobby]
+  D --> E{Activity still active?}
+  E -->|No| J[Group Dashboard with Finished Notice]
+  E -->|Yes| F[Record Consent and Presence]
+  F --> G{Owner Assigned This Player as Controller?}
+  G -->|Yes and set is live| H[Writable Live Scoreboard]
+  G -->|No and set is live| I[Read-Only Live Score]
+  G -->|Set setup| K[Activity Lobby]
+```
+
+## 1.2.1 Between Sets
+
+```mermaid
+flowchart TD
+  A[Set Confirmed] --> B[phase set-setup]
+  B --> C[Owner Lobby]
+  B --> D[Everyone Else Lobby]
+  D --> E[Waiting for Owner to Start Next Set]
+  C --> F[Owner Starts Set]
+  F --> G[phase live]
+  G --> H[Controllers Writable Board]
+  G --> I[Others Read-Only Board]
 ```
 
 ## 1.3 Activity Session Slot Lifecycle
@@ -239,9 +253,10 @@ flowchart TD
   B --> C{Device Reconnects?}
   C -->|Yes| D[Restore Latest Backend State]
   C -->|No After 3 Hours| E[Mark Activity Abandoned]
-  E --> F[Preserve Latest Score Snapshot]
-  F --> G[No Automatic Leaderboard Impact]
-  G --> H[Signed-In User May Later Calculate Partial Result or Disregard]
+  E --> F[Keep Latest Score Snapshot on Activity]
+  F --> G[Completed Sets Stay on Leaderboard]
+  G --> H[Ignore In-Progress Set]
+  H --> I[Not Enterable Dashboard Has No Card]
 ```
 
 ## 2. Context Identification Flow

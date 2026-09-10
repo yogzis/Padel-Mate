@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { copy } from '../../../copy';
+import { AppFooter } from '../../../components/app-footer';
 import { GoHomeButton } from '../../../components/go-home-button';
 import { InviteDecision } from '../../../components/invite-decision';
 import { StoreError } from '../../../lib/server/errors';
@@ -39,8 +40,8 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   const preview = await loadInvitePreview(user.userId, token);
 
   return (
-    <main className="sign-in-page">
-      <div className="sign-in-card">
+    <div className="sign-in-page">
+      <main className="sign-in-card">
         {preview.ok ? (
           <InviteDecision token={token} inviterName={preview.inviterName} />
         ) : (
@@ -50,7 +51,8 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
             <GoHomeButton />
           </>
         )}
-      </div>
-    </main>
+      </main>
+      <AppFooter />
+    </div>
   );
 }

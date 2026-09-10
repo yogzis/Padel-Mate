@@ -80,14 +80,16 @@
 - [x] The open context dashboard polls every 5 seconds so a newly created activity offers Join without a page reload.
 - [x] A browser refresh returns to the last open scoring group unless the user had gone back to Groups or Mates.
 - [x] An activity is numbered only after the first set starts. Empty sessions do not take a number.
-- [x] A finished activity sends the user to that context dashboard instead of leaving them on the activity screen.
+- [x] A finished or abandoned activity sends the user to that context dashboard instead of leaving them on the activity screen.
 - [ ] A second device can join the shared activity session.
 - [x] A third registered member can accept without occupying a scoring controller slot.
-- [x] Participant Leave revokes consent, pauses the activity, and returns the leaver to the group dashboard.
-- [x] Owner Leave closes the activity for everyone; a live set is abandoned with no leaderboard impact.
+- [x] Participant Leave asks for confirmation, then revokes consent, pauses the activity, and returns the leaver to the group dashboard.
+- [x] Owner Leave asks for confirmation, then closes the activity for everyone; a live set is abandoned with no leaderboard impact.
+- [x] Between sets, everyone except the owner stays in the activity lobby with a waiting message.
+- [x] The owner can assign live-score controllers from the lobby and from the live scoring chip.
 - [ ] Unexpected disconnect reserves the slot for 1-2 minutes and does not pause play.
 - [ ] Unconcluded activity with all devices disconnected is abandoned after 3 hours.
-- [ ] Abandoned activity preserves latest score snapshot without leaderboard impact.
+- [x] Abandoned activity preserves latest score snapshot without leaderboard impact; an in-progress set is ignored.
 - [ ] Score updates on one device appear on the other connected device.
 - [ ] Shared session connection status is visible.
 - [ ] Current-game score update history is available from the live scoreboard.
@@ -112,7 +114,7 @@
 - [x] Secrets are kept out of source control and out of `wrangler.jsonc`.
 - [x] Deploys are automated from the `production` branch and run migrations first.
 - [x] Pull requests into `development` and `production` run lint, tests, and tsc before merge.
-- [x] Branch promotion is one-way: feature PRs target `main`, then `main` → `development` → `production`, each hop gated by `CI / check`.
+- [x] Branch promotion is one-way: feature PRs target `development`, then `development` → `production`, each hop gated by `CI / check`.
 - [ ] Scoring engine is separated from UI.
 - [x] Context engine creates deterministic context keys.
 - [ ] Leaderboard calculation is separated from UI.
@@ -247,7 +249,7 @@
 - [ ] Reservation expiry allows a different device to join.
 - [ ] All devices disconnected for 3 hours marks unconcluded activity as abandoned.
 - [ ] Abandoned activity does not update leaderboard automatically.
-- [ ] Abandoned activity can later be reopened for manual calculate-or-disregard decision.
+- [x] Closed activities are not enterable; an in-progress set at abandon is ignored and is not written to the set log.
 - [ ] Joined device loads context, activity, teams, set score, game score, and configuration.
 - [ ] Point scored on device A appears on device B.
 - [ ] Point scored on device B appears on device A.
@@ -288,7 +290,8 @@
 - [ ] Player names are visible under each team.
 - [ ] Buttons are large enough for touch.
 - [x] On phones, Groups and Mates are available from the header menu.
-- [x] The signed-in header shows the Padel Mate wordmark logo.
+- [x] The signed-in header shows the horizontal Padel Mate lockup.
+- [x] Chrome, sign-in, invite, and admin pages show a dark brand footer that reveals at the end of the page and fades out when the user scrolls away. The live scoreboard does not.
 - [x] App chrome uses the logo navy and royal blue tokens. The live scoreboard stays dark olive with Blue and Red teams.
 - [x] Static UI copy is edited in `copy/en/`, not inside components.
 - [x] Chrome focus rings, control borders, and Red Team score text meet WCAG 2.2 AA contrast.
