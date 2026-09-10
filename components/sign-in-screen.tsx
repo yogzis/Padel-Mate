@@ -3,6 +3,7 @@
 import { ShieldOff } from 'lucide-react';
 import { useState } from 'react';
 import { copy } from '../copy';
+import { AppFooter } from './app-footer';
 import { authClient } from '../lib/auth-client';
 
 const BANNED_ERROR_CODE = 'banned_user';
@@ -39,8 +40,8 @@ export default function SignInScreen({
   };
 
   return (
-    <main className="sign-in-page">
-      <div className="sign-in-card">
+    <div className="sign-in-page">
+      <main className="sign-in-card">
         {isSuspended ? (
           <>
             <span className="brand-mark"><ShieldOff size={18} /></span>
@@ -48,7 +49,10 @@ export default function SignInScreen({
           </>
         ) : (
           <>
-            <img className="sign-in-logo" src="/padel-mate-logo.png" alt="" />
+            <picture>
+              <source srcSet="/padel-mate-logo.webp" type="image/webp" />
+              <img className="sign-in-logo" src="/padel-mate-logo.png" alt="" width={404} height={122} />
+            </picture>
             <h1 className="visually-hidden">{copy.chrome.appName}</h1>
           </>
         )}
@@ -61,8 +65,9 @@ export default function SignInScreen({
           {isRedirecting ? copy.signIn.redirecting : copy.signIn.continueWithGoogle}
         </button>
         {error && !isSuspended && <p className="sign-in-error" role="alert">{error}</p>}
-      </div>
-    </main>
+      </main>
+      <AppFooter />
+    </div>
   );
 }
 

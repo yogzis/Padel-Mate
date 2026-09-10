@@ -43,7 +43,7 @@ The implemented stack:
 
 ### Branding
 
-Logo colors sampled from `public/padel-mate-logo.png`. Chrome uses these tokens. The live scoreboard does not.
+Chrome colors stay the navy and royal tokens below. The header lockup is `public/padel-mate-logo.png` (WebP sibling). The circular mark is `public/padel-mate-mark.png`. Favicons are `public/favicon.ico`, `apple-touch-icon.png`, `icon-192.png`, and `icon-512.png`. The live scoreboard does not use these tokens. Lime in the lockup and footer wordmark is artwork only.
 
 | Token | Hex | Role |
 | --- | --- | --- |
@@ -83,8 +83,9 @@ Responsible for:
 - Calling domain actions.
 - Showing validation errors.
 - Showing Groups and Mates in the header menu on phones, where the header tabs are hidden.
-- Rendering the signed-in header brand as the wordmark image at `/padel-mate-logo.png`. The button keeps the accessible name Padel Mate home.
-- Rendering the same wordmark on the sign-in card. The heading stays available to assistive tech.
+- Rendering the signed-in header brand as the horizontal lockup at `/padel-mate-logo.webp` with a PNG fallback. The button keeps the accessible name Padel Mate home.
+- Rendering the same lockup on the sign-in card. The heading stays available to assistive tech.
+- Rendering a dark brand footer after chrome, sign-in, invite, and admin content. An Intersection Observer fades it in when it enters the viewport and fades it out when the user scrolls away. The live scoreboard omits the footer.
 
 The UI layer should not contain scoring rule complexity.
 

@@ -615,7 +615,8 @@ Acceptance criteria:
 ### Usability
 
 - Mobile phone usage is the primary experience.
-- The signed-in header and the sign-in card show the Padel Mate wordmark logo in place of a separate icon and title.
+- The signed-in header and the sign-in card show the horizontal Padel Mate lockup (circular PM mark plus wordmark) in place of a separate icon and title.
+- Chrome pages have a dark brand footer with the circular mark and two-tone wordmark. It sits after the page content, reveals when it scrolls into view, and fades out when the user scrolls away. The live scoreboard has no footer.
 - App chrome (header, sign-in, buttons, selections, live pills) uses the logo navy and royal blues. The live scoreboard stays dark olive, with Blue Team and Red Team as the only strong team colors.
 - On phones, Groups and Mates are available from the header menu because the header tabs are hidden.
 - Main scoring buttons must be large enough for quick use during play.

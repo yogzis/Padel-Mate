@@ -1,6 +1,9 @@
 export const chrome = {
   appName: 'Padel Mate',
   homeAria: 'Padel Mate home',
+  footerAria: 'Padel Mate',
+  wordmarkPadel: 'Padel',
+  wordmarkMate: 'Mate',
   mainNavAria: 'Main navigation',
   groups: 'Groups',
   mates: 'Mates',
