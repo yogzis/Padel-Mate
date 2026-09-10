@@ -11,11 +11,6 @@ export function AppFooter() {
     const footer = footerRef.current;
     if (!footer) return;
 
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setIsVisible(true);
-      return;
-    }
-
     const observer = new IntersectionObserver(
       ([entry]) => {
         setIsVisible(entry.isIntersecting);
