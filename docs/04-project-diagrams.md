@@ -208,11 +208,13 @@ flowchart TD
   A[Owner Opens Active Activity] --> B[Share Session Link or Code]
   B --> C[Member Opens Link or Enters Code]
   C --> D[Sign In Required]
-  D --> E[Record Consent and Presence]
-  E --> F{Owner Assigned This Player as Controller?}
-  F -->|Yes and set is live| G[Writable Live Scoreboard]
-  F -->|No and set is live| H[Read-Only Live Score]
-  F -->|Set setup| I[Activity Lobby]
+  D --> E{Activity still active?}
+  E -->|No| J[Group Dashboard with Finished Notice]
+  E -->|Yes| F[Record Consent and Presence]
+  F --> G{Owner Assigned This Player as Controller?}
+  G -->|Yes and set is live| H[Writable Live Scoreboard]
+  G -->|No and set is live| I[Read-Only Live Score]
+  G -->|Set setup| K[Activity Lobby]
 ```
 
 ## 1.3 Activity Session Slot Lifecycle
@@ -237,9 +239,10 @@ flowchart TD
   B --> C{Device Reconnects?}
   C -->|Yes| D[Restore Latest Backend State]
   C -->|No After 3 Hours| E[Mark Activity Abandoned]
-  E --> F[Preserve Latest Score Snapshot]
-  F --> G[No Automatic Leaderboard Impact]
-  G --> H[Signed-In User May Later Calculate Partial Result or Disregard]
+  E --> F[Keep Latest Score Snapshot on Activity]
+  F --> G[Completed Sets Stay on Leaderboard]
+  G --> H[Ignore In-Progress Set]
+  H --> I[Not Enterable Dashboard Has No Card]
 ```
 
 ## 2. Context Identification Flow

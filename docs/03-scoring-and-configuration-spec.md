@@ -470,14 +470,14 @@ Context Dashboard requirements:
 
 - Show the last 5 numbered activity session set logs for the selected scoreboard context. Empty sessions that never started a set do not occupy this window.
 - Group logs by activity number and date.
-- Include normal completed sets, manual partial sets, disregarded sets, and abandoned activity markers when relevant.
+- Include normal completed sets, manual partial sets, and disregarded sets. Do not include abandoned in-progress set markers.
 - Detailed logs older than the most recent 5 numbered activity sessions for the context may be deleted or purged.
 - Purging old detailed logs must not change leaderboard aggregate totals.
 
 Live activity requirements:
 
 - The Set Setup page shows only the current activity session set log.
-- The current activity set log updates after confirmed sets, manual partial sets, disregarded sets, and abandoned session markers.
+- The current activity set log updates after confirmed sets, manual partial sets, and disregarded sets.
 - The current activity set log must not show unrelated context history.
 
 ## 15. Backend Persistence Rules
@@ -555,9 +555,9 @@ If all devices disconnect and the activity has not been concluded:
 - The activity remains live for 3 hours.
 - If a device reconnects within 3 hours, the app restores the latest backend state and continues the activity.
 - If no device reconnects within 3 hours, the activity is marked abandoned.
-- The latest saved scoring snapshot is preserved.
-- The abandoned activity does not update the set result, individual player score, or leaderboard automatically.
-- A signed-in user may later reopen the abandoned activity and manually choose whether to calculate the partial score or disregard it.
+- The latest saved scoring snapshot is preserved on the activity record.
+- The abandoned activity does not update the set result, individual player score, or leaderboard. Completed sets already in the set log stand. An in-progress set is ignored and is not written to the set log.
+- Finished and abandoned activities are not enterable. A share link, session code, or last-session reload opens the context dashboard.
 
 ### 15.5 Shared Session Synchronization
 

@@ -49,7 +49,7 @@ import {
   guestSlotId,
   isGuestSlot,
 } from '../lib/player-identity';
-import { activityIsPaused, shouldShowLiveScoreboard } from '../lib/activity-roles';
+import { activityIsEnterable, activityIsPaused, shouldShowLiveScoreboard } from '../lib/activity-roles';
 import {
   filterGroupList,
   groupListPrefsKey,
@@ -321,7 +321,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         activityId: activeActivityId,
         deviceId,
       });
-      if (fresh.activity.status === 'completed' || fresh.activity.status === 'abandoned') {
+      if (!activityIsEnterable(fresh.activity.status)) {
         await returnToContext(
           fresh.activity.contextId,
           fresh.activity.id,
@@ -477,7 +477,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
         activityRef: reference.trim(),
         deviceId,
       });
-      if (data.activity.status === 'completed') {
+      if (!activityIsEnterable(data.activity.status)) {
         await returnToContext(data.activity.contextId, data.activity.id);
         setJoinCode('');
         return data;
@@ -488,15 +488,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
       setBluePlayerIds(data.activity.state.bluePlayerIds.length === 2
         ? data.activity.state.bluePlayerIds
         : firstTwoSlotIds(data.players));
-      if (data.activity.status === 'abandoned' && data.activity.state.phase === 'live') {
-        setScreen('scoreboard');
-        if (data.viewerIsOwner) {
-          setModal('manual');
-          setNotice(copy.errors.notices.reviewPartial);
-        }
-      } else {
-        setScreen(activityScreen(data));
-      }
+      setScreen(activityScreen(data));
       setJoinCode('');
       return data;
     } catch (caught) {
@@ -541,7 +533,7 @@ export default function PadelApp({ initialUser }: { initialUser: AppUser }) {
           if (cached) {
             try {
               const restored = JSON.parse(cached) as ActivityData;
-              if (restored.activity.status === 'completed') {
+              if (!activityIsEnterable(restored.activity.status)) {
                 void returnToContext(restored.activity.contextId, restored.activity.id);
                 return;
               }
@@ -1321,8 +1313,7 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
   onOpenActivity: (id: string) => void;
 }) {
   const logsByActivity = useMemo(() => groupLogs(data.logs), [data.logs]);
-  const liveActivities = data.activities.filter((activity) => activity.status === 'active');
-  const abandonedActivity = data.activities.find((activity) => activity.status === 'abandoned');
+  const liveActivities = data.activities.filter((activity) => activityIsEnterable(activity.status));
   return (
     <main className="page-content">
       <section className="context-topline">
@@ -1373,16 +1364,6 @@ function ContextDashboard({ data, onNewActivity, onOpenActivity }: {
               </button>
             </section>
           ))}
-          {abandonedActivity && (
-            <section className="resume-panel">
-              <span className="live-dot"><span /> {copy.dashboard.savedPartial}</span>
-              <h3>{copy.dashboard.ownerActivity(abandonedActivity.ownerName)}</h3>
-              <button className="secondary-button" onClick={() => onOpenActivity(abandonedActivity.id)}>
-                {copy.dashboard.reviewResult}
-                {' '}<ChevronRight size={17} />
-              </button>
-            </section>
-          )}
         </aside>
       </div>
 
