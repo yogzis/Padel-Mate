@@ -820,7 +820,7 @@ Postconditions:
 - Controllers assigned by the owner receive the writable live scoreboard when a set is live. Other accepted members receive a read-only score or the lobby.
 - A connected joining device receives a label based on the signed-in user's display name, such as `Yoni's device`.
 - The client loads the latest backend state, including who has accepted and who is still pending.
-- If the activity is already finished, the client opens that context dashboard instead of the activity screen.
+- If the activity is already finished or abandoned, the client opens that context dashboard instead of the activity screen. Consent and device presence are not recorded.
 
 ### 7.9 Leaving a Shared Activity Session
 
@@ -858,9 +858,9 @@ Postconditions:
 
 - The activity remains live for 3 hours.
 - If no device reconnects within 3 hours, the activity is marked abandoned.
-- The latest saved scoring snapshot is preserved.
-- The leaderboard is not updated automatically.
-- A signed-in user may later reopen the abandoned activity and manually choose whether to calculate a partial result or disregard it.
+- The latest saved scoring snapshot is preserved on the activity record.
+- Completed sets already in the set log stay on the leaderboard. An in-progress set is ignored and is not written to the set log.
+- The activity is not enterable. A share link, session code, or last-session reload opens the context dashboard.
 
 ### 7.12 Receiving Remote Score Updates
 
@@ -915,7 +915,7 @@ Postconditions:
 
 - Activity status becomes completed.
 - Every device still viewing that activity opens the context dashboard.
-- Opening the share link or last-session recovery for a finished activity also opens the context dashboard.
+- Opening the share link or last-session recovery for a finished or abandoned activity also opens the context dashboard.
 
 ## 8. Error Handling
 
@@ -936,7 +936,7 @@ The app should handle these cases:
 - Attempt to accept an activity the user is not a member of.
 - Attempt to score from a disconnected or unrecovered device.
 - Attempt to calculate a tied manual partial set.
-- Attempt to reopen an abandoned activity.
+- Attempt to join a finished or abandoned activity (open the context dashboard instead).
 - Backend save failure.
 - Backend restore failure.
 - Realtime connection loss.
@@ -992,7 +992,7 @@ Persistence rules:
 - Restore from backend first on reload; use local cache only as a fallback display state while retrying backend restore.
 - Retain the last 5 numbered activity session set logs per scoring context. Empty sessions that never started a set do not occupy this window.
 - Purge older detailed set logs for that context according to retention policy while preserving leaderboard aggregates.
-- Mark abandoned sessions without applying leaderboard updates.
+- Mark abandoned sessions without applying leaderboard updates. Do not write an in-progress set to the set log.
 
 ### 9.1 Backend Consistency Requirements
 
@@ -1078,7 +1078,7 @@ Rules:
 - A person who is not a registered context member cannot accept.
 - If all devices disconnect, the activity remains live for 3 hours.
 - After 3 hours with no connected devices, the activity is marked abandoned.
-- Abandoned activity sessions preserve the latest scoring snapshot but do not update the leaderboard.
+- Abandoned activity sessions do not update the leaderboard. Completed sets already in the set log stand. An in-progress set is ignored. Closed activities are not enterable.
 
 ### 9.7 In-Game History Requirements
 
@@ -1105,7 +1105,7 @@ Retention rules:
 - Older detailed logs for that context may be purged.
 - Purging old detailed logs must not change leaderboard aggregate totals.
 - The Set Setup page shows only the current activity session set log.
-- Current activity logs include normal completed sets, manual partial sets, disregarded sets, and abandoned activity markers where relevant.
+- Current activity logs include normal completed sets, manual partial sets, and disregarded sets. Abandoned in-progress sets are not logged.
 
 ## 10. Testing Strategy
 

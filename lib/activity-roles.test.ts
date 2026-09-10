@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  activityIsEnterable,
   activityIsPaused,
   closeOwnedOutcome,
   controllersOf,
   exclusiveReleaseKind,
   normalizeControllerIds,
+  setLogIsVisible,
   shouldShowLiveScoreboard,
   stripController,
 } from './activity-roles';
@@ -54,6 +56,19 @@ test('owner close is abandon during a live set and finish otherwise', () => {
   assert.equal(closeOwnedOutcome('live'), 'abandon');
   assert.equal(closeOwnedOutcome('set-setup'), 'finish');
   assert.equal(closeOwnedOutcome('ended'), 'finish');
+});
+
+test('only an active activity is enterable', () => {
+  assert.equal(activityIsEnterable('active'), true);
+  assert.equal(activityIsEnterable('completed'), false);
+  assert.equal(activityIsEnterable('abandoned'), false);
+});
+
+test('abandoned set-log markers stay hidden; concluded sets stay visible', () => {
+  assert.equal(setLogIsVisible('abandoned'), false);
+  assert.equal(setLogIsVisible('normal'), true);
+  assert.equal(setLogIsVisible('manual-partial'), true);
+  assert.equal(setLogIsVisible('disregarded'), true);
 });
 
 test('exclusive join closes an owned activity and leaves a participated one', () => {

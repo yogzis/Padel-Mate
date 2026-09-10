@@ -135,7 +135,7 @@ A connected device can log out or leave the session. If a participant leaves, th
 
 If a device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available. Unexpected disconnects do not pause the activity.
 
-If all devices disconnect and the activity is not concluded, the activity remains live for 3 hours. After 3 hours, it is marked abandoned with the latest saved score snapshot and no leaderboard impact.
+If all devices disconnect and the activity is not concluded, the activity remains live for 3 hours. After 3 hours, it is marked abandoned. Completed sets already in the set log stay on the leaderboard. An in-progress set is ignored and is not written to the set log. The group dashboard does not offer a way to re-enter a finished or abandoned activity.
 
 ### Set
 
@@ -220,7 +220,7 @@ Authentication is required for global app access in the MVP.
 21. The owner may manually end an unfinished set when the real activity time is over.
 22. If a set is manually ended, the owner must confirm whether to calculate the partial set score or disregard the set.
 23. The owner may start another set with a new team pairing. Controllers stay on the live panel between sets.
-24. The owner may end the activity and return to the context dashboard. If the activity is already finished or abandoned, any device that still has that session open, reloads it, or opens its share link is taken to the same context dashboard instead of staying on the activity screen.
+24. The owner may end the activity and return to the context dashboard. If the activity is already finished or abandoned, any device that still has that session open, reloads it, opens its share link, or enters its session code is taken to the same context dashboard instead of staying on the activity screen. The dashboard does not show a live or review card for that activity.
 
 ## 6. Activity Configuration Requirements
 
@@ -571,16 +571,16 @@ Acceptance criteria:
 - Opening a code or share link records consent for a registered context member.
 - A player can be in only one activity at a time.
 - If a participant leaves, consent is revoked, they return to the group dashboard with Join, and scoring pauses until they rejoin.
-- If the owner leaves, or joins or creates another activity, their owned activity is closed for everyone. A live set is abandoned with a snapshot and no leaderboard impact. Otherwise the activity is finished.
+- If the owner leaves, or joins or creates another activity, their owned activity is closed for everyone. A live set is abandoned: completed sets already in the set log stay on the leaderboard, and the in-progress set is ignored. Otherwise the activity is finished.
 - A person who is not a registered member of the context cannot accept or join.
 - If a connected device disconnects unexpectedly, its slot remains reserved for 1-2 minutes before becoming available. Unexpected disconnects do not pause the activity.
 - If all devices disconnect before the activity is concluded, the activity remains live for 3 hours.
-- After 3 hours with no connected devices, an unconcluded activity is marked abandoned with the latest saved scoring snapshot and no leaderboard impact.
-- A signed-in user may later reopen an abandoned activity and manually choose whether to calculate a partial set or disregard it.
+- After 3 hours with no connected devices, an unconcluded activity is marked abandoned. Completed sets already in the set log stay on the leaderboard. An in-progress set is ignored and is not written to the set log.
+- Finished and abandoned activities are not enterable. The group dashboard lists only active activities. A share link, session code, or last-session reload for a closed activity opens that context dashboard with a finished notice.
 - If a device disconnects and reconnects, it must fetch the latest backend state before allowing new score updates.
 - The backend must prevent duplicate or out-of-order score updates from corrupting the game state.
 - If two devices attempt to score at the same time, the backend must apply a single ordered sequence of accepted events and both devices must converge to the same latest state.
-- If the activity has already finished, the user is taken to that context dashboard. They must not remain on the finished activity screen.
+- If the activity has already finished or been abandoned, the user is taken to that context dashboard. They must not remain on the activity screen.
 
 ### FR-15 In-Game Score Update History
 
@@ -639,7 +639,7 @@ Acceptance criteria:
 - A reconnecting device must restore from the backend before accepting new scoring input.
 - Session slots must be released immediately when a device leaves intentionally.
 - Unexpected disconnects must reserve the device slot for only 1-2 minutes.
-- Abandoned sessions must preserve the latest snapshot without updating the leaderboard automatically.
+- Abandoned sessions must not update the leaderboard. Completed sets already in the set log stand. An in-progress set is ignored.
 
 ### Maintainability
 
@@ -699,7 +699,7 @@ Included:
 - Near real-time in-game score synchronization across connected devices.
 - One activity per player, with concurrent group activities listed by owner name.
 - 1-2 minute reservation window for unexpected device disconnects.
-- 3-hour abandoned-session handling with no automatic leaderboard impact.
+- 3-hour abandoned-session handling that ignores an in-progress set and does not re-enter closed activities.
 
 Deferred:
 

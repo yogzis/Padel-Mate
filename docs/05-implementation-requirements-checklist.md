@@ -80,14 +80,14 @@
 - [x] The open context dashboard polls every 5 seconds so a newly created activity offers Join without a page reload.
 - [x] A browser refresh returns to the last open scoring group unless the user had gone back to Groups or Mates.
 - [x] An activity is numbered only after the first set starts. Empty sessions do not take a number.
-- [x] A finished activity sends the user to that context dashboard instead of leaving them on the activity screen.
+- [x] A finished or abandoned activity sends the user to that context dashboard instead of leaving them on the activity screen.
 - [ ] A second device can join the shared activity session.
 - [x] A third registered member can accept without occupying a scoring controller slot.
 - [x] Participant Leave revokes consent, pauses the activity, and returns the leaver to the group dashboard.
 - [x] Owner Leave closes the activity for everyone; a live set is abandoned with no leaderboard impact.
 - [ ] Unexpected disconnect reserves the slot for 1-2 minutes and does not pause play.
 - [ ] Unconcluded activity with all devices disconnected is abandoned after 3 hours.
-- [ ] Abandoned activity preserves latest score snapshot without leaderboard impact.
+- [x] Abandoned activity preserves latest score snapshot without leaderboard impact; an in-progress set is ignored.
 - [ ] Score updates on one device appear on the other connected device.
 - [ ] Shared session connection status is visible.
 - [ ] Current-game score update history is available from the live scoreboard.
@@ -247,7 +247,7 @@
 - [ ] Reservation expiry allows a different device to join.
 - [ ] All devices disconnected for 3 hours marks unconcluded activity as abandoned.
 - [ ] Abandoned activity does not update leaderboard automatically.
-- [ ] Abandoned activity can later be reopened for manual calculate-or-disregard decision.
+- [x] Closed activities are not enterable; an in-progress set at abandon is ignored and is not written to the set log.
 - [ ] Joined device loads context, activity, teams, set score, game score, and configuration.
 - [ ] Point scored on device A appears on device B.
 - [ ] Point scored on device B appears on device A.

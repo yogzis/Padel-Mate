@@ -1,4 +1,4 @@
-import type { LiveActivityState } from './domain';
+import type { LiveActivityState, SetLogEntry } from './domain';
 import { isGuestSlot } from './player-identity';
 
 export const MIN_SCORE_CONTROLLERS = 1;
@@ -60,6 +60,14 @@ export function activityIsPaused(pendingPlayerIds: readonly string[]): boolean {
 
 export function closeOwnedOutcome(phase: LiveActivityState['phase']): CloseOwnedOutcome {
   return phase === 'live' ? 'abandon' : 'finish';
+}
+
+export function activityIsEnterable(status: string): status is 'active' {
+  return status === 'active';
+}
+
+export function setLogIsVisible(conclusionType: SetLogEntry['conclusionType']): boolean {
+  return conclusionType !== 'abandoned';
 }
 
 export function exclusiveReleaseKind(isOwner: boolean): ExclusiveReleaseKind {
