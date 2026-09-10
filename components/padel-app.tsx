@@ -65,6 +65,7 @@ import { awardPoint } from '../lib/scoring';
 import { copy } from '../copy';
 import { ShareInviteDialog } from './share-invite-dialog';
 import { ChromeSelect } from './chrome-select';
+import { TeamVsTeamBanner } from './team-vs-banner';
 import { useMateInviteCountdown } from './use-mate-invite-countdown';
 
 type AppUser = { id: string; displayName: string; email: string; isAdmin: boolean };
@@ -1472,11 +1473,10 @@ function SetSetupView({ data, blueIds, onBlueChange, onStart, onShare, onRefresh
         <p className="pause-banner">{copy.live.pausedWaiting(pendingPlayerNames(data))}</p>
       )}
 
-      <section className="team-builder">
-        <div className="team-preview blue-preview"><span>{copy.live.blueTeam}</span><strong>{bluePlayers.length === 2 ? bluePlayers.map((player) => player.name).join(' & ') : copy.live.chooseTwoPlayers}</strong></div>
-        <div className="versus">{copy.live.vs}</div>
-        <div className="team-preview red-preview"><span>{copy.live.redTeam}</span><strong>{redPlayers.length === 2 ? redPlayers.map((player) => player.name).join(' & ') : copy.live.waiting}</strong></div>
-      </section>
+      <TeamVsTeamBanner
+        bluePlayers={bluePlayers.length === 2 ? bluePlayers : null}
+        redPlayers={redPlayers.length === 2 ? redPlayers : null}
+      />
 
       <section className={waitingForAccepts ? 'consent-roster waiting' : 'consent-roster'}>
         <div className="section-title">
