@@ -83,8 +83,10 @@
 - [x] A finished or abandoned activity sends the user to that context dashboard instead of leaving them on the activity screen.
 - [ ] A second device can join the shared activity session.
 - [x] A third registered member can accept without occupying a scoring controller slot.
-- [x] Participant Leave revokes consent, pauses the activity, and returns the leaver to the group dashboard.
-- [x] Owner Leave closes the activity for everyone; a live set is abandoned with no leaderboard impact.
+- [x] Participant Leave asks for confirmation, then revokes consent, pauses the activity, and returns the leaver to the group dashboard.
+- [x] Owner Leave asks for confirmation, then closes the activity for everyone; a live set is abandoned with no leaderboard impact.
+- [x] Between sets, everyone except the owner stays in the activity lobby with a waiting message.
+- [x] The owner can assign live-score controllers from the lobby and from the live scoring chip.
 - [ ] Unexpected disconnect reserves the slot for 1-2 minutes and does not pause play.
 - [ ] Unconcluded activity with all devices disconnected is abandoned after 3 hours.
 - [x] Abandoned activity preserves latest score snapshot without leaderboard impact; an in-progress set is ignored.

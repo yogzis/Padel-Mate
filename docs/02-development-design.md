@@ -590,6 +590,8 @@ Controls:
 - Blue Team selection.
 - Red Team selection.
 - Share, which opens the share dialog.
+- Leave, which asks for confirmation before pausing or closing the activity.
+- Finish activity, for the owner, which uses the same confirmation and close path as Leave.
 - Start set button.
 
 Validation:
@@ -603,6 +605,7 @@ Display:
 
 - A roster of every registered member as In or Pending. Guests are not listed.
 - Owner picker for 1-2 live-score controllers among accepted players.
+- Non-owners see a waiting message after a set has been played, instead of the live scoreboard.
 - Current activity session set log only.
 - Completed sets.
 - Manual partial sets.
@@ -627,7 +630,7 @@ Display:
 - Decisive point indicator when relevant.
 - Save status indicator: Saving, Saved, or Retry needed.
 - Shared session status: Connected, Reconnecting, or Offline.
-- Joined device count when available.
+- Joined device count when available. The owner can open the scoring chip to assign 1-2 accepted controllers.
 - Current-game history action.
 
 Portrait layout requirements:
@@ -665,6 +668,7 @@ Dialogs:
 
 - Game completion confirmation.
 - Set completion confirmation.
+- Leave confirmation. Participant Leave pauses scoring until they rejoin. Owner Leave closes the activity. Closing the phone or leaving the site is not Leave.
 - Manual unfinished set confirmation with calculate or disregard actions.
 - Current-game score update history modal.
 - Share dialog: session code, Copy of the join link, WhatsApp, and connected devices.
@@ -817,7 +821,7 @@ Postconditions:
 - The user must be a registered member of the activity's context.
 - Consent is written first, and the device is recorded for presence.
 - If the player already owns or has accepted another active activity, that other activity is left: owned activities are closed, participated ones are paused.
-- Controllers assigned by the owner receive the writable live scoreboard when a set is live. Other accepted members receive a read-only score or the lobby.
+- Controllers assigned by the owner receive the writable live scoreboard when a set is live. Other accepted members receive a read-only score. Between sets, everyone except the owner stays in the lobby.
 - A connected joining device receives a label based on the signed-in user's display name, such as `Yoni's device`.
 - The client loads the latest backend state, including who has accepted and who is still pending.
 - If the activity is already finished or abandoned, the client opens that context dashboard instead of the activity screen. Consent and device presence are not recorded.
@@ -830,9 +834,10 @@ Preconditions:
 
 Postconditions:
 
+- Leave is confirmed in a dialog before it runs.
 - A participant Leave revokes consent, releases their device, removes them from the controller list, and pauses scoring until they rejoin. They are taken to the group dashboard with Join.
 - An owner Leave closes the activity for everyone: abandon with snapshot if a set is live, otherwise finish. Everyone is taken to the group dashboard.
-- Unexpected disconnect still reserves the device for 1-2 minutes and does not pause the activity.
+- Unexpected disconnect still reserves the device for 1-2 minutes and does not pause the activity. Closing the phone or leaving the site is not Leave.
 
 ### 7.10 Unexpected Device Disconnect
 
@@ -910,6 +915,7 @@ Preconditions:
 
 - Active activity exists.
 - There is no live set still in progress.
+- From the lobby, Finish activity uses the same confirmation dialog and close path as owner Leave.
 
 Postconditions:
 
